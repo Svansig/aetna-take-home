@@ -27,6 +27,7 @@ dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.m
 | OpenAPI 3.1 at `/openapi.json`, Swagger UI at `/docs`                                    | ✅ Implemented                               |
 | Docker image and Compose deployment                                                      | ✅ Implemented                               |
 | GitHub Actions CI (format, lint, typecheck, test, build)                                 | ✅ Implemented                               |
+| Production image published to GHCR after CI on `main`                                    | ✅ Implemented                               |
 | **US1 List All Movies:** `GET /api/v1/movies`                                            | ✅ Implemented (V1 only)                     |
 | **US2 Movie Details:** `GET /api/v1/movies/{movieId}`                                    | ✅ Implemented (V1 only, naive ratings join) |
 | **US3 Movies By Year:** `GET /api/v1/movies/year/{year}`, `GET /api/v1/movies?year=`     | ✅ Implemented (V1 only)                     |
@@ -475,10 +476,11 @@ targeting `main` and every push to `main`, on a GitHub-hosted `ubuntu-24.04` run
   `main` run is what triggers a release.
 - CI never publishes or deploys. Third-party actions are pinned to commit SHAs:
 
-  | Action               | Version | Commit                                     |
-  | -------------------- | ------- | ------------------------------------------ |
-  | `actions/checkout`   | v7.0.1  | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
-  | `actions/setup-node` | v7.1.0  | `949feb2413d6458794dcd2491c4babbbce0c15c1` |
+  | Action                                   | Version | Commit                                     |
+  | ---------------------------------------- | ------- | ------------------------------------------ |
+  | `actions/checkout`                       | v7.0.1  | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+  | `actions/setup-node`                     | v7.1.0  | `949feb2413d6458794dcd2491c4babbbce0c15c1` |
+  | `actions/upload-artifact` (publish only) | v7.0.2  | `cf430e030ddbb5b0abf93d22962f4752f3646cd9` |
 
   To upgrade, review the new release, then replace both the SHA and the version
   comment.
@@ -488,6 +490,73 @@ To reproduce CI locally:
 ```sh
 npm ci --ignore-scripts && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
 ```
+
+## Image publishing
+
+[`.github/workflows/publish.yml`](.github/workflows/publish.yml) publishes the
+production image to **`ghcr.io/svansig/aetna-take-home`** after CI succeeds for a
+push to `main`. Pull requests never publish: the workflow is triggered by
+`workflow_run`, always runs from the default branch, and accepts only a
+successful CI run for a `push` to `main` of this repository.
+
+How a release is produced:
+
+1. **Verify** (read-only token). The CI run's event, conclusion, branch,
+   repository, workflow file and commit SHA are checked, and the SHA must be
+   reachable from `main`. Nothing else from the CI run is used: no artifacts are
+   downloaded.
+2. **Build** that exact commit for `linux/amd64` with the existing multi-stage
+   Dockerfile. OCI labels link the image to the repository
+   (`org.opencontainers.image.source`) and commit (`org.opencontainers.image.revision`).
+3. **Check** the image: no `*.db`, `*.sqlite*` or `.env*` files, no dev
+   dependencies, non-root `node` user. The container must refuse to start without
+   its databases, then must become `healthy` and pass
+   [`deploy/smoke-test.js`](deploy/smoke-test.js) with the committed databases
+   mounted read-only and a read-only root filesystem.
+4. **Push** with the `GITHUB_TOKEN` (`packages: write` on this job only; no PAT).
+
+| Reference                                      | Meaning                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------ |
+| `ghcr.io/svansig/aetna-take-home:<commit-sha>` | Immutable by convention: the build of that full 40-character commit SHA. |
+| `ghcr.io/svansig/aetna-take-home@sha256:<…>`   | Immutable: what production deploys.                                      |
+| `ghcr.io/svansig/aetna-take-home:production`   | Moving: the latest approved release, polled by the production host.      |
+
+- The digest is recorded in the run's job summary and in a `release-<sha>`
+  artifact (`release.json`, kept 90 days), and the workflow checks that
+  `production` resolves to exactly that digest after moving it.
+- Releases run one at a time (`concurrency: publish-production`, never
+  cancelled). `production` only moves forward: if the commit it currently points
+  to isn't an ancestor of the new commit, the commit tag is still pushed but
+  `production` is left alone. An older run finishing late can't roll production
+  back.
+- No database files, environment files or Cloudflare credentials are in the
+  image. The token is only piped to `docker login`, never printed.
+
+### Making the package public (one-time)
+
+GHCR creates the package as **private** on the first push. After the first
+successful publish run:
+
+1. GitHub → your profile → **Packages** → `aetna-take-home` → **Package settings**.
+2. **Danger zone → Change visibility → Public**.
+3. Under **Manage Actions access**, confirm `Svansig/aetna-take-home` has
+   **Write** (it is linked automatically by the `org.opencontainers.image.source`
+   label).
+
+The last step of every publish run checks anonymous pull access and logs a
+warning while the package is still private. To check it yourself, with no
+credentials:
+
+```sh
+docker logout ghcr.io
+docker pull ghcr.io/svansig/aetna-take-home:production
+docker image inspect ghcr.io/svansig/aetna-take-home:production \
+  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+```
+
+To find a commit's digest: open the publish run for that commit (Actions →
+Publish) and read the job summary, or run
+`docker buildx imagetools inspect ghcr.io/svansig/aetna-take-home:<commit-sha>`.
 
 ## Docker
 
