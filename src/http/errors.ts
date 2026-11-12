@@ -10,7 +10,7 @@ export const ErrorResponseSchema = z
       details: z
         .array(
           z.object({
-            path: z.string().meta({ example: 'query.page' }),
+            path: z.string().meta({ example: 'page' }),
             message: z.string(),
           }),
         )

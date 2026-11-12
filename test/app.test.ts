@@ -3,8 +3,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { createLogger } from '../src/logger.js';
-import { createApiVersions } from '../src/versions.js';
-import { createTestApp } from './helpers.js';
+import { createTestApp, createTestVersions } from './helpers.js';
 
 describe('createApp', () => {
   it('constructs an Express application from injected dependencies', () => {
@@ -14,7 +13,7 @@ describe('createApp', () => {
   });
 
   it('rejects duplicate API version ids', () => {
-    const [v1] = createApiVersions();
+    const [v1] = createTestVersions();
     expect(() => createApp({ logger: createLogger('silent'), versions: [v1!, v1!] })).toThrow(
       /Duplicate API version/,
     );
@@ -55,14 +54,14 @@ describe('API documentation', () => {
     });
   });
 
-  it('documents only operations that exist (no movie endpoints yet)', async () => {
+  it('documents only operations that exist (V1 movie listing; nothing under V2)', async () => {
     const { app } = createTestApp();
     const res = await request(app).get('/openapi.json');
-    expect(Object.keys(res.body.paths as object)).toEqual(['/health']);
+    expect(Object.keys(res.body.paths as object)).toEqual(['/health', '/api/v1/movies']);
   });
 
   it('includes operations registered by an API version under its prefix', async () => {
-    const [v1, v2] = createApiVersions();
+    const [v1, v2] = createTestVersions();
     const { app } = createTestApp({
       versions: [
         {

@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createApp } from './app.js';
 import { ConfigError, loadConfig } from './config.js';
+import { openReadOnlyDatabase, type DatabaseSync } from './db/sqlite.js';
 import { createLogger } from './logger.js';
 import { createApiVersions } from './versions.js';
 
@@ -30,7 +31,16 @@ function main(): void {
     process.exit(1);
   });
 
-  const app = createApp({ logger, versions: createApiVersions() });
+  let v1MoviesDb: DatabaseSync;
+  try {
+    v1MoviesDb = openReadOnlyDatabase(config.V1_MOVIES_DB_PATH);
+  } catch (err) {
+    // Fail fast. The path goes to the operator log only, never to clients.
+    logger.fatal({ err, path: config.V1_MOVIES_DB_PATH }, 'Cannot open V1 movies database');
+    process.exit(1);
+  }
+
+  const app = createApp({ logger, versions: createApiVersions({ v1MoviesDb }) });
   const server = createServer(app);
 
   server.on('error', (err) => {
@@ -57,8 +67,9 @@ function main(): void {
     }, SHUTDOWN_TIMEOUT_MS).unref();
 
     // Stops accepting new connections, closes idle keep-alive sockets and waits
-    // for in-flight requests to finish.
+    // for in-flight requests to finish; only then is the database closed.
     server.close((err) => {
+      v1MoviesDb.close();
       if (err) {
         logger.error({ err }, 'Error during shutdown');
         process.exit(1);

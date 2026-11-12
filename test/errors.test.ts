@@ -42,8 +42,8 @@ describe('error handling', () => {
     expect(res.body.error.requestId).toBe(res.headers['x-request-id']);
   });
 
-  it.each(['/api/v1', '/api/v1/movies', '/api/v2/movies'])(
-    'returns 404 under mounted-but-empty version prefix %s',
+  it.each(['/api/v1', '/api/v1/unknown', '/api/v2', '/api/v2/movies'])(
+    'returns 404 for unregistered routes under version prefixes: %s',
     async (url) => {
       const { app } = createTestApp();
       const res = await request(app).get(url);

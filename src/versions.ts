@@ -1,5 +1,9 @@
 import { Router } from 'express';
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
+import type { DatabaseSync } from './db/sqlite.js';
+import { registerMoviesDocs, createMoviesRouter } from './movies/routes.js';
+import { MovieService } from './movies/service.js';
+import { SqliteMovieRepository } from './movies/sqlite-movie-repository.js';
 
 export type ApiVersionId = 'v1' | 'v2';
 
@@ -21,17 +25,29 @@ export interface ApiVersion {
 
 export const apiBasePath = (id: ApiVersionId): string => `/api/${id}`;
 
+/** Open connections owned by the caller (opened at startup, closed at shutdown). */
+export interface ApiVersionDependencies {
+  readonly v1MoviesDb: DatabaseSync;
+}
+
 /**
- * Composition root for the versioned APIs.
+ * Composition root for the versioned APIs: wires each version's data access into
+ * the shared service and router factories.
  *
- * Phase 0: both versions are mounted with no operations, so every request under
- * `/api/v1` or `/api/v2` falls through to the shared 404 handler. Later phases
- * construct each version's data-access dependencies here (from `Config`) and pass
- * them into shared router factories.
+ * - v1: `GET /movies` over the original supplied `movies.db`.
+ * - v2: mounted with no operations yet, so its requests reach the shared 404.
  */
-export function createApiVersions(): ApiVersion[] {
+export function createApiVersions({ v1MoviesDb }: ApiVersionDependencies): ApiVersion[] {
+  const v1Movies = new MovieService(new SqliteMovieRepository(v1MoviesDb));
+
   return [
-    { id: 'v1', router: Router() },
+    {
+      id: 'v1',
+      router: createMoviesRouter(v1Movies),
+      registerDocs: (registry, basePath) => {
+        registerMoviesDocs(registry, { basePath, version: 'v1' });
+      },
+    },
     { id: 'v2', router: Router() },
   ];
 }
