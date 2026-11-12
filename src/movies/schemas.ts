@@ -1,6 +1,12 @@
 import { z } from 'zod';
-import { paginatedResponseSchema } from '../http/pagination.js';
-import { POSITIVE_INTEGER_PARAM_DOC, positiveIntegerParam } from '../http/params.js';
+import { PageQuerySchema, paginatedResponseSchema } from '../http/pagination.js';
+import {
+  FOUR_DIGIT_YEAR_PARAM_DOC,
+  fourDigitYearParam,
+  POSITIVE_INTEGER_PARAM_DOC,
+  positiveIntegerParam,
+  singleValueError,
+} from '../http/params.js';
 
 export const GenreSchema = z
   .strictObject({
@@ -41,6 +47,63 @@ export const MovieListResponseSchema = paginatedResponseSchema(
 );
 
 export type MovieListResponse = z.infer<typeof MovieListResponseSchema>;
+
+export const SORT_ORDERS = ['asc', 'desc'] as const;
+
+/** Chronological direction for year-filtered listings. Case-sensitive. */
+export type SortOrder = (typeof SORT_ORDERS)[number];
+
+const sortOrderParam = z
+  .enum(SORT_ORDERS, {
+    error: singleValueError('sortOrder', 'sortOrder must be "asc" or "desc"'),
+  })
+  .default('asc');
+
+const SORT_ORDER_DESCRIPTION =
+  'Chronological direction. `asc` (default): `releaseDate` ascending, then `movieId` ' +
+  'ascending for movies released on the same day. `desc`: `releaseDate` descending, ' +
+  'then `movieId` descending. Case-sensitive.';
+
+const YEAR_DESCRIPTION =
+  'Release year as exactly four digits, `0001` to `9999`. A valid year with no movies ' +
+  'returns an empty page, not a 404.';
+
+/** `/movies/year/:year` path parameter. */
+export const MovieYearParamsSchema = z.object({
+  year: fourDigitYearParam('year').meta({
+    ...FOUR_DIGIT_YEAR_PARAM_DOC,
+    description: YEAR_DESCRIPTION,
+    example: '1999',
+  }),
+});
+
+/** Query for `/movies/year/:year`: the shared `page` plus `sortOrder`. Unknown keys are ignored. */
+export const MoviesByYearQuerySchema = PageQuerySchema.extend({
+  sortOrder: sortOrderParam.meta({ description: SORT_ORDER_DESCRIPTION }),
+});
+
+/**
+ * Query for `/movies`: the shared `page` plus an optional `year` filter. `sortOrder`
+ * is not part of this schema, because it only applies once `year` is present; the
+ * route then reads it with `MoviesByYearQuerySchema`. Without `year` it stays an
+ * ignored unknown parameter, as before.
+ */
+export const MovieListQuerySchema = PageQuerySchema.extend({
+  // No `example`: Swagger UI would pre-fill it and turn "list all" into a filtered request.
+  year: fourDigitYearParam('year')
+    .optional()
+    .meta({
+      ...FOUR_DIGIT_YEAR_PARAM_DOC,
+      description: `Optional filter. ${YEAR_DESCRIPTION} Omit it to list all movies.`,
+    }),
+});
+
+/** OpenAPI-only view of the `/movies` query, including the year-only `sortOrder`. */
+export const MovieListQueryDocSchema = MovieListQuerySchema.extend({
+  sortOrder: sortOrderParam.meta({
+    description: `Only applies together with \`year\`; ignored otherwise. ${SORT_ORDER_DESCRIPTION}`,
+  }),
+});
 
 /** `:movieId` path parameter: the numeric id from movies.db, not an IMDb id. */
 export const MovieIdParamsSchema = z.object({

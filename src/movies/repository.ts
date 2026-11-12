@@ -1,4 +1,11 @@
-import type { MovieRecord, MovieSummary } from './schemas.js';
+import type { PageWindow } from '../http/pagination.js';
+import type { MovieRecord, MovieSummary, SortOrder } from './schemas.js';
+
+/** Conditions narrowing a movie listing. */
+export interface MovieFilter {
+  /** Calendar year (1–9999). Movies without a release date never match. */
+  readonly releaseYear: number;
+}
 
 /**
  * Movie data access used by `MovieService`. Each API version supplies its own
@@ -6,9 +13,19 @@ import type { MovieRecord, MovieSummary } from './schemas.js';
  * validated application records and order results deterministically.
  */
 export interface MovieRepository {
-  countMovies(): number;
-  /** Movies ordered by their stable primary identifier, ascending. */
-  listMovies(window: { limit: number; offset: number }): MovieSummary[];
+  /** Number of movies, or of movies matching `filter`. */
+  countMovies(filter?: MovieFilter): number;
+  /** All movies ordered by their stable primary identifier, ascending. */
+  listMovies(window: PageWindow): MovieSummary[];
+  /**
+   * Movies matching `filter`, ordered by release date and then by the primary
+   * identifier, both in `sortOrder` direction, so equal dates are deterministic.
+   */
+  listMoviesByReleaseDate(
+    filter: MovieFilter,
+    sortOrder: SortOrder,
+    window: PageWindow,
+  ): MovieSummary[];
   /** One movie by its numeric `movieId`, or `undefined` if there is none. */
   findMovieById(movieId: number): MovieRecord | undefined;
 }

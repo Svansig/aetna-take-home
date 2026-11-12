@@ -36,7 +36,8 @@ export interface ApiVersionDependencies {
  * Composition root for the versioned APIs: wires each version's data access into
  * the shared service and router factories.
  *
- * - v1: `GET /movies` and `GET /movies/:movieId` over the original supplied
+ * - v1: `GET /movies` (optionally `?year=`), `GET /movies/year/:year` and
+ *   `GET /movies/:movieId` over the original supplied
  *   `movies.db`, with ratings from `ratings.db` matched by the naive numeric id
  *   association (see `NaiveSqliteRatingSource`).
  * - v2: mounted with no operations yet, so its requests reach the shared 404.

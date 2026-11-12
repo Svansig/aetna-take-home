@@ -3,10 +3,11 @@
 A read-only TypeScript/Express API over a movie metadata dataset and a user ratings
 dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.md).
 
-> **Status: Phase 2.** User Story 1 (**List All Movies**, `GET /api/v1/movies`)
-> and User Story 2 (**Movie Details**, `GET /api/v1/movies/{movieId}`) are
-> implemented. Movies By Year and Movies By Genre are **not implemented yet**, and
-> V2 isn't operational.
+> **Status: Phase 3.** User Story 1 (**List All Movies**, `GET /api/v1/movies`),
+> User Story 2 (**Movie Details**, `GET /api/v1/movies/{movieId}`) and User
+> Story 3 (**Movies By Year**, `GET /api/v1/movies/year/{year}` or
+> `GET /api/v1/movies?year=`) are implemented. Movies By Genre is **not
+> implemented yet**, and V2 isn't operational.
 >
 > ⚠️ **V1 average ratings may belong to a different movie.** The supplied movies
 > and ratings databases use different movie id systems (TMDB vs MovieLens), and V1
@@ -15,23 +16,23 @@ dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.m
 
 ## Implemented vs. planned
 
-| Area                                                  | Status                                       |
-| ----------------------------------------------------- | -------------------------------------------- |
-| App factory, server bootstrap, graceful shutdown      | ✅ Implemented                               |
-| Zod-validated environment configuration               | ✅ Implemented                               |
-| Structured logging (pino), per-request ids            | ✅ Implemented                               |
-| Centralised error handling (400 / 404 / 500 envelope) | ✅ Implemented                               |
-| `GET /health`                                         | ✅ Implemented                               |
-| OpenAPI 3.1 at `/openapi.json`, Swagger UI at `/docs` | ✅ Implemented                               |
-| Docker image and Compose deployment                   | ✅ Implemented                               |
-| **US1 List All Movies:** `GET /api/v1/movies`         | ✅ Implemented (V1 only)                     |
-| **US2 Movie Details:** `GET /api/v1/movies/{movieId}` | ✅ Implemented (V1 only, naive ratings join) |
-| Correct movie ↔ rating id mapping                     | ⏳ Planned for V2                            |
-| US3 Movies By Year                                    | ⏳ Planned                                   |
-| US4 Movies By Genre                                   | ⏳ Planned                                   |
-| `/api/v2` (rebuilt dataset)                           | ⏳ Mounted, with no operations (returns 404) |
-| V2 dataset rebuilt from Kaggle sources                | ⏳ Planned                                   |
-| Cloudflare Tunnel deployment                          | ⏳ Planned                                   |
+| Area                                                                                 | Status                                       |
+| ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| App factory, server bootstrap, graceful shutdown                                     | ✅ Implemented                               |
+| Zod-validated environment configuration                                              | ✅ Implemented                               |
+| Structured logging (pino), per-request ids                                           | ✅ Implemented                               |
+| Centralised error handling (400 / 404 / 500 envelope)                                | ✅ Implemented                               |
+| `GET /health`                                                                        | ✅ Implemented                               |
+| OpenAPI 3.1 at `/openapi.json`, Swagger UI at `/docs`                                | ✅ Implemented                               |
+| Docker image and Compose deployment                                                  | ✅ Implemented                               |
+| **US1 List All Movies:** `GET /api/v1/movies`                                        | ✅ Implemented (V1 only)                     |
+| **US2 Movie Details:** `GET /api/v1/movies/{movieId}`                                | ✅ Implemented (V1 only, naive ratings join) |
+| **US3 Movies By Year:** `GET /api/v1/movies/year/{year}`, `GET /api/v1/movies?year=` | ✅ Implemented (V1 only)                     |
+| Correct movie ↔ rating id mapping                                                    | ⏳ Planned for V2                            |
+| US4 Movies By Genre                                                                  | ⏳ Planned                                   |
+| `/api/v2` (rebuilt dataset)                                                          | ⏳ Mounted, with no operations (returns 404) |
+| V2 dataset rebuilt from Kaggle sources                                               | ⏳ Planned                                   |
+| Cloudflare Tunnel deployment                                                         | ⏳ Planned                                   |
 
 ## Technology stack
 
@@ -98,6 +99,7 @@ Then open:
 - Health: <http://127.0.0.1:3000/health>
 - Movies: <http://127.0.0.1:3000/api/v1/movies?page=2>
 - Movie details: <http://127.0.0.1:3000/api/v1/movies/11>
+- Movies by year: <http://127.0.0.1:3000/api/v1/movies/year/1999?sortOrder=desc>
 
 ## Endpoints
 
@@ -105,9 +107,13 @@ Then open:
 
 Lists every movie in the original supplied `db/movies.db`, 50 per page.
 
-| Query parameter | Required | Default | Rules                                                                          |
-| --------------- | -------- | ------- | ------------------------------------------------------------------------------ |
-| `page`          | no       | `1`     | 1-indexed, plain base-10 digits, from 1 to 2^53−1 (`Number.MAX_SAFE_INTEGER`). |
+| Query parameter | Required | Default | Rules                                                                                                    |
+| --------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `page`          | no       | `1`     | 1-indexed, plain base-10 digits, from 1 to 2^53−1 (`Number.MAX_SAFE_INTEGER`).                           |
+| `year`          | no       |         | Filters to one release year. See [movies by year](#get-apiv1moviesyearyear-movies-by-year-user-story-3). |
+| `sortOrder`     | no       | `asc`   | `asc` or `desc`. **Only applies together with `year`**; ignored without it.                              |
+
+Without `year`, the listing behaves exactly as in User Story 1 below.
 
 **Pagination**
 
@@ -244,6 +250,59 @@ response contract stays unchanged. **V2 (planned, not implemented)** will rebuil
 the data from the Kaggle sources with the correct id mapping and plug in its own
 `RatingSource`, with no change to the HTTP layer.
 
+### `GET /api/v1/movies/year/{year}`: movies by year (User Story 3)
+
+Lists the movies released in one calendar year, 50 per page, in chronological
+order. The same listing is available as a filter on the collection,
+`GET /api/v1/movies?year={year}`. Both forms call the same service method and SQL,
+so the same `year`, `page` and `sortOrder` give identical responses.
+
+| Parameter   | In                           | Required | Default | Rules                                                                                    |
+| ----------- | ---------------------------- | -------- | ------- | ---------------------------------------------------------------------------------------- |
+| `year`      | path (or query on `/movies`) | yes      |         | Exactly four decimal digits, `0001` to `9999`. Not limited to years present in the data. |
+| `page`      | query                        | no       | `1`     | Same rules as the listing: 1-indexed, plain digits, leading zeros allowed.               |
+| `sortOrder` | query                        | no       | `asc`   | `asc` or `desc`, case-sensitive.                                                         |
+
+**Ordering.** `asc` sorts by `releaseDate` ascending, then `movieId` ascending for
+movies released on the same day. `desc` reverses both. The `movieId` tie-break
+keeps page boundaries deterministic: 67 of the 723 movies of 1999 share
+`1999-01-01`, so that date spans pages 1 and 2.
+
+**Filtering.** A movie matches when its stored `YYYY-MM-DD` date lies between
+`YYYY-01-01` and `YYYY-12-31` inclusive. This is a plain string range in SQLite, so
+there's no date parsing, no time zone, and year 9999 needs no year 10000. The 84
+movies without a release date never match any year.
+
+**Pagination and empty results.** `totalItems` and `totalPages` count only the
+matching movies. A valid year with no movies (for example `1850`, `0001` or
+`9999` in V1) returns `200` with `data: []`, `totalItems: 0`, `totalPages: 0` and
+the requested `page`. It is never a 404. A page past the end also returns `200`
+with `data: []`.
+
+**Response.** The same `MovieListResponse` envelope and five-field
+`MovieSummary` items as the unfiltered listing. `releaseDate` stays
+`string | null` in the schema for consistency, but is always a date here.
+
+| Status | When                                                                                                                                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `200`  | Any valid `year` and `page`, whether or not movies match.                                                                                                                                                                                        |
+| `400`  | `VALIDATION_ERROR`: `year` is not four digits (`99`, `999`, `10000`, `-1999`, `1999.5`, `abc`, `1e3`, empty) or is `0000`; an invalid `page` or `sortOrder` (`random`, `ASC`, `descending`, empty); or a repeated `year`, `page` or `sortOrder`. |
+| `500`  | `INTERNAL_ERROR`: an unexpected error, such as a malformed stored row. Details are only logged.                                                                                                                                                  |
+
+```sh
+curl 'http://127.0.0.1:3000/api/v1/movies/year/1999'                  # 723 movies, 15 pages, ascending
+curl 'http://127.0.0.1:3000/api/v1/movies/year/1999?page=15'          # final page: 23 movies
+curl 'http://127.0.0.1:3000/api/v1/movies/year/1999?sortOrder=desc'   # newest first
+curl 'http://127.0.0.1:3000/api/v1/movies?year=1999&page=2&sortOrder=desc'  # same as the path form
+curl 'http://127.0.0.1:3000/api/v1/movies/year/1850'                  # 200, empty
+curl 'http://127.0.0.1:3000/api/v1/movies/year/999'                   # 400
+```
+
+In Swagger UI, open **Movies (v1) → GET /api/v1/movies/year/{year}** (or
+**GET /api/v1/movies** and fill in `year`), choose **Try it out**, enter a year,
+an optional `page`, pick a `sortOrder` and click **Execute**. The response
+examples are real 1999 records, checked against the database by a test.
+
 ## Scripts
 
 | Script                  | Purpose                                    |
@@ -279,6 +338,9 @@ The movie tests use three kinds of data:
   - Every one of the 45,430 movies is mapped for both the listing and the
     details, and the documented null and `[]` counts are checked.
   - The Star Wars (3.69) and Capote examples are checked verbatim.
+  - All 15 pages of 1999 are fetched in both directions through both endpoint
+    styles and compared with an independent query that extracts the year
+    (rather than using the date range). Every year's count is checked the same way.
   - A test confirms the SHA-256 hashes of both databases don't change during
     the detail requests.
 - **In-memory SQLite fixtures** for edge cases and exact arithmetic:
@@ -286,6 +348,8 @@ The movie tests use three kinds of data:
     dates, NULL budgets
   - rating averages and rounding, movies with no ratings
   - an empty table and closed connections
+  - year boundaries (`1999-01-01`, `1999-12-31`, adjacent years, years `0001` and
+    `9999`, empty and NULL dates) and a 120-movie same-date tie across pages
 - **Injected fakes** for service rules: never computing an offset for a page
   past the end, 404 for unknown ids, and half-up rounding (1.005 → 1.01).
 
@@ -346,16 +410,16 @@ src/
   http/
     errors.ts          ErrorResponse schema, HttpError, 404 + central error handlers
     health.ts          GET /health and its OpenAPI registration
-    pagination.ts      PAGE_SIZE, page query schema, pagination metadata, page → LIMIT/OFFSET
-    params.ts          Shared positive-integer parameter validation (page, movieId)
+    pagination.ts      PAGE_SIZE, page query schema, pagination metadata, page → LIMIT/OFFSET, paginate()
+    params.ts          Shared parameter validation (positive integers, four-digit years, repeats)
     request-logger.ts  pino-http: request ids, per-request logging
   movies/
-    schemas.ts         Genre, MovieSummary, MovieListResponse, ProductionCompany, MovieDetails, movieId param
+    schemas.ts         Genre, MovieSummary, MovieListResponse, ProductionCompany, MovieDetails; movieId, year, sortOrder params
     repository.ts      MovieRepository and RatingSource interfaces (implemented per version)
     sqlite-movie-repository.ts  V1 movies: prepared SQL, row validation, JSON parsing, fallbacks
     naive-sqlite-rating-source.ts  V1 ratings: naive numeric-id aggregate over ratings.db
-    service.ts         MovieService: pagination, details, 404, rating rounding (no Express)
-    routes.ts          Shared router factory and OpenAPI registration for /movies, /movies/{movieId}
+    service.ts         MovieService: listings (all, by year), details, 404, rating rounding (no Express)
+    routes.ts          Shared router factory and OpenAPI registration for /movies, /movies/year/{year}, /movies/{movieId}
   docs/
     openapi.ts         OpenAPI 3.1 document builder and /docs, /openapi.json router
 test/                  Vitest + Supertest suites and helpers
@@ -366,7 +430,8 @@ kaggle/                Kaggle source CSVs for the future V2 rebuild (git- and do
 ## API versions
 
 - **`/api/v1`** serves the **original supplied databases, unchanged**, and keeps
-  their known limitations. Today that means `GET /api/v1/movies` and
+  their known limitations. Today that means `GET /api/v1/movies` (optionally
+  with `year`), `GET /api/v1/movies/year/{year}` and
   `GET /api/v1/movies/{movieId}`. Most importantly, `movies.movieId` holds TMDB
   ids while `ratings.movieId` holds MovieLens ids, and V1 deliberately matches
   them by the raw number, so its average ratings are unreliable.
@@ -424,7 +489,24 @@ behaviour is the same. Only data access differs. Each version is an `ApiVersion`
   rowid), so ordering needs no extra index and nothing was added to the schema.
   The count is a separate query. The service skips the data query for pages past
   the end, so no unsafe offset is ever computed, and the repository refuses
-  unsafe windows as a second guard.
+  unsafe windows as a second guard. Both listings share one `paginate()` helper,
+  so their metadata and out-of-range rules can't diverge.
+- **One year-filtered operation behind both year endpoints.** `/movies/year/{year}`
+  and `/movies?year=` validate their input and call the same
+  `MovieService.listMoviesByYear`. The repository takes a small `MovieFilter`
+  object (`{ releaseYear }`) for its count and a single `listMoviesByReleaseDate`
+  method, and the count and listing SQL share one `WHERE` condition. A later genre
+  filter can extend `MovieFilter` instead of adding another listing path.
+- **Year filtering as a string range, not a date function.** Release dates are
+  stored as `YYYY-MM-DD` text, so `releaseDate BETWEEN 'YYYY-01-01' AND 'YYYY-12-31'`
+  is exact, has no time zone, and works for year 9999. The sort direction can only
+  be `ASC` or `DESC` from a fixed map; both statements are prepared at startup and
+  every value is a bound parameter. Without an index (none may be added), a year
+  query scans the table and sorts the matches: about 10 ms for the largest year
+  (2014, 1,973 movies). That's acceptable, so there's no caching.
+- **`sortOrder` only applies to year listings.** Without `year`, `/movies` keeps
+  its `movieId` order and treats `sortOrder` as an unknown, ignored parameter, as
+  before. General sorting is out of scope.
 - **Stored data is validated, never repaired.** Each row is checked with Zod and
   its genre JSON is parsed in the repository. Anything unexpected raises a
   `DataIntegrityError`, which the central handler logs (with the row id and failing
@@ -448,8 +530,8 @@ behaviour is the same. Only data access differs. Each version is an `ApiVersion`
 
 ## Known limitations
 
-- User Stories 1 and 2 are implemented. Movies By Year and Movies By Genre don't
-  exist yet, and nothing under `/api/v2` is implemented.
+- User Stories 1, 2 and 3 are implemented. Movies By Genre doesn't exist yet,
+  and nothing under `/api/v2` is implemented.
 - **V1 average ratings are joined by a mismatched id** (TMDB vs MovieLens) and
   may describe another movie. See
   [V1 ratings: the identifier mismatch](#v1-ratings-the-identifier-mismatch).
@@ -467,8 +549,11 @@ behaviour is the same. Only data access differs. Each version is an `ApiVersion`
   - **959 movies have an empty overview.** `description` is `null` for these.
 - Offset pagination isn't snapshot-consistent in general. That's harmless here
   because V1 data is read-only.
-- Rating lookups scan the unindexed `ratings` table (about 2 ms each), because
-  the supplied schema must not change.
+- Rating lookups scan the unindexed `ratings` table (about 2 ms each), and year
+  listings scan and sort `movies` (up to about 10 ms), because the supplied
+  schema must not change.
+- On `/movies` without `year`, `sortOrder` is silently ignored, like any other
+  unknown parameter.
 - `V2_DB_PATH` is validated for shape only, not opened or checked for existence.
 - The Docker base image is pinned by tag, not digest.
 - Swagger UI loads its assets from the app, so it doesn't depend on a CDN. The
@@ -476,7 +561,7 @@ behaviour is the same. Only data access differs. Each version is an `ApiVersion`
 
 ## Remaining work
 
-1. Movies by year (with sort direction) and movies by genre.
+1. Movies by genre (including combined year/genre filtering).
 2. Build the V2 dataset from `kaggle/` and implement V2 data access. This
    includes the correct TMDB↔MovieLens rating mapping (via `links_small.csv`),
    original language and recovered production companies.

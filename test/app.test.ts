@@ -60,6 +60,7 @@ describe('API documentation', () => {
     expect(Object.keys(res.body.paths as object)).toEqual([
       '/health',
       '/api/v1/movies',
+      '/api/v1/movies/year/{year}',
       '/api/v1/movies/{movieId}',
     ]);
   });

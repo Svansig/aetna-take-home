@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { DataIntegrityError } from '../../src/db/sqlite.js';
 import { MovieSummarySchema } from '../../src/movies/schemas.js';
-import { SqliteMovieRepository, toMovieRecord } from '../../src/movies/sqlite-movie-repository.js';
+import {
+  SqliteMovieRepository,
+  toMovieRecord,
+  yearBounds,
+} from '../../src/movies/sqlite-movie-repository.js';
 import { createFixtureMoviesDb, suppliedMoviesDb, type FixtureMovie } from '../helpers.js';
 
 describe('SqliteMovieRepository (fixtures)', () => {
@@ -256,5 +260,97 @@ describe('SqliteMovieRepository.findMovieById (supplied movies.db)', () => {
       releaseDate: record.releaseDate,
       budget: record.budget,
     }).toEqual(listed);
+  });
+});
+
+describe('yearBounds', () => {
+  it.each([
+    [1, '0001-01-01', '0001-12-31'],
+    [999, '0999-01-01', '0999-12-31'],
+    [1999, '1999-01-01', '1999-12-31'],
+    [9999, '9999-01-01', '9999-12-31'],
+  ])('%d -> %s..%s', (year, yearStart, yearEnd) => {
+    expect(yearBounds(year)).toEqual({ yearStart, yearEnd });
+  });
+
+  it.each([0, -1, 10000, 1999.5, Number.NaN])('refuses %d', (year) => {
+    expect(() => yearBounds(year)).toThrow(RangeError);
+  });
+});
+
+describe('SqliteMovieRepository year filter (fixtures)', () => {
+  const repo = new SqliteMovieRepository(
+    createFixtureMoviesDb([
+      { movieId: 5, releaseDate: '1999-06-15' },
+      { movieId: 3, releaseDate: '1999-06-15' },
+      { movieId: 4, releaseDate: '1999-01-01' },
+      { movieId: 9, releaseDate: '1999-12-31' },
+      { movieId: 1, releaseDate: '1998-12-31' },
+      { movieId: 2, releaseDate: '2000-01-01' },
+      { movieId: 6, releaseDate: '' },
+      { movieId: 7, releaseDate: null },
+    ]),
+  );
+  const filter = { releaseYear: 1999 };
+  const ids = (movies: { imdbId: string }[]) => movies.map((m) => Number(m.imdbId.slice(2)));
+
+  it('counts only the matching year, leaving the unfiltered count unchanged', () => {
+    expect(repo.countMovies(filter)).toBe(4);
+    expect(repo.countMovies({ releaseYear: 2000 })).toBe(1);
+    expect(repo.countMovies({ releaseYear: 1850 })).toBe(0);
+    expect(repo.countMovies()).toBe(8);
+  });
+
+  it('orders by release date, then movieId, in the requested direction', () => {
+    const all = { limit: 50, offset: 0 };
+    expect(ids(repo.listMoviesByReleaseDate(filter, 'asc', all))).toEqual([4, 3, 5, 9]);
+    expect(ids(repo.listMoviesByReleaseDate(filter, 'desc', all))).toEqual([9, 5, 3, 4]);
+  });
+
+  it('applies LIMIT/OFFSET after ordering', () => {
+    expect(ids(repo.listMoviesByReleaseDate(filter, 'asc', { limit: 2, offset: 1 }))).toEqual([
+      3, 5,
+    ]);
+    expect(repo.listMoviesByReleaseDate(filter, 'desc', { limit: 2, offset: 4 })).toEqual([]);
+  });
+
+  it('refuses unsafe years and windows before reaching SQLite', () => {
+    expect(() => repo.countMovies({ releaseYear: 10000 })).toThrow(RangeError);
+    expect(() =>
+      repo.listMoviesByReleaseDate({ releaseYear: 0 }, 'asc', { limit: 1, offset: 0 }),
+    ).toThrow(RangeError);
+    expect(() =>
+      repo.listMoviesByReleaseDate(filter, 'asc', {
+        limit: 50,
+        offset: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    ).toThrow(RangeError);
+  });
+
+  it('maps rows with the shared listing mapper (integrity errors included)', () => {
+    const broken = new SqliteMovieRepository(
+      createFixtureMoviesDb([{ movieId: 8, releaseDate: '1999-02-02', genres: '[' }]),
+    );
+    expect(() => broken.listMoviesByReleaseDate(filter, 'asc', { limit: 1, offset: 0 })).toThrow(
+      DataIntegrityError,
+    );
+  });
+});
+
+describe('SqliteMovieRepository year filter (supplied movies.db)', () => {
+  it('counts every year exactly like an independent year extraction', () => {
+    const db = suppliedMoviesDb();
+    const repo = new SqliteMovieRepository(db);
+    const years = db
+      .prepare(
+        `SELECT CAST(substr(releaseDate, 1, 4) AS INTEGER) AS year, COUNT(*) AS total
+           FROM movies WHERE releaseDate <> '' GROUP BY year`,
+      )
+      .all() as { year: number; total: number }[];
+    for (const { year, total } of years) {
+      expect(repo.countMovies({ releaseYear: year })).toBe(total);
+    }
+    // Every dated movie is in exactly one year; the 84 undated ones in none.
+    expect(years.reduce((n, y) => n + y.total, 0)).toBe(45430 - 84);
   });
 });

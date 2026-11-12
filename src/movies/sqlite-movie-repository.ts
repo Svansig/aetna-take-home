@@ -1,12 +1,14 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { z } from 'zod';
 import { DataIntegrityError } from '../db/sqlite.js';
-import type { MovieRepository } from './repository.js';
+import type { PageWindow } from '../http/pagination.js';
+import type { MovieFilter, MovieRepository } from './repository.js';
 import {
   MovieDetailsSchema,
   MovieSummarySchema,
   type MovieRecord,
   type MovieSummary,
+  type SortOrder,
 } from './schemas.js';
 
 /** Raw column types as stored in the V1 `movies` table (listing columns). */
@@ -33,6 +35,18 @@ type MovieRow = z.infer<typeof MovieRowSchema>;
 const SUMMARY_COLUMNS = 'movieId, imdbId, title, genres, releaseDate, budget';
 
 /**
+ * Release-year condition, shared by the filtered count and listing so they always
+ * agree. `releaseDate` is stored as `YYYY-MM-DD` text, so an inclusive string range
+ * from `YYYY-01-01` to `YYYY-12-31` selects exactly that year without applying a
+ * date function to each row, and needs no year 10000 for 9999. Missing dates
+ * (`''` or NULL) never fall inside the range.
+ */
+const RELEASE_YEAR_CONDITION = 'releaseDate BETWEEN :yearStart AND :yearEnd';
+
+/** The only SQL text a sort order can produce; nothing from the request reaches SQL. */
+const SQL_DIRECTION = { asc: 'ASC', desc: 'DESC' } as const satisfies Record<SortOrder, string>;
+
+/**
  * V1 movie repository over the original supplied `movies.db`.
  *
  * Statements are prepared once per connection. `movieId` is the table's INTEGER
@@ -44,9 +58,28 @@ export class SqliteMovieRepository implements MovieRepository {
   private readonly countStatement: StatementSync;
   private readonly listStatement: StatementSync;
   private readonly findStatement: StatementSync;
+  private readonly countByYearStatement: StatementSync;
+  private readonly listByReleaseDateStatements: Record<SortOrder, StatementSync>;
 
   constructor(db: DatabaseSync) {
     this.countStatement = db.prepare('SELECT COUNT(*) AS total FROM movies');
+    this.countByYearStatement = db.prepare(
+      `SELECT COUNT(*) AS total FROM movies WHERE ${RELEASE_YEAR_CONDITION}`,
+    );
+    const listByReleaseDate = (sortOrder: SortOrder) => {
+      const direction = SQL_DIRECTION[sortOrder];
+      return db.prepare(
+        `SELECT ${SUMMARY_COLUMNS}
+           FROM movies
+          WHERE ${RELEASE_YEAR_CONDITION}
+          ORDER BY releaseDate ${direction}, movieId ${direction}
+          LIMIT :limit OFFSET :offset`,
+      );
+    };
+    this.listByReleaseDateStatements = {
+      asc: listByReleaseDate('asc'),
+      desc: listByReleaseDate('desc'),
+    };
     this.listStatement = db.prepare(
       `SELECT ${SUMMARY_COLUMNS}
          FROM movies
@@ -60,16 +93,27 @@ export class SqliteMovieRepository implements MovieRepository {
     );
   }
 
-  countMovies(): number {
-    const row = this.countStatement.get() as { total: number } | undefined;
+  countMovies(filter?: MovieFilter): number {
+    const row = (
+      filter === undefined
+        ? this.countStatement.get()
+        : this.countByYearStatement.get(yearBounds(filter.releaseYear))
+    ) as { total: number } | undefined;
     return row?.total ?? 0;
   }
 
-  listMovies({ limit, offset }: { limit: number; offset: number }): MovieSummary[] {
-    if (!Number.isSafeInteger(limit) || !Number.isSafeInteger(offset) || limit < 0 || offset < 0) {
-      throw new RangeError('limit and offset must be non-negative safe integers');
-    }
-    return this.listStatement.all({ limit, offset }).map(toMovieSummary);
+  listMovies(window: PageWindow): MovieSummary[] {
+    return this.listStatement.all(checkedWindow(window)).map(toMovieSummary);
+  }
+
+  listMoviesByReleaseDate(
+    filter: MovieFilter,
+    sortOrder: SortOrder,
+    window: PageWindow,
+  ): MovieSummary[] {
+    return this.listByReleaseDateStatements[sortOrder]
+      .all({ ...yearBounds(filter.releaseYear), ...checkedWindow(window) })
+      .map(toMovieSummary);
   }
 
   findMovieById(movieId: number): MovieRecord | undefined {
@@ -79,6 +123,23 @@ export class SqliteMovieRepository implements MovieRepository {
     const row = this.findStatement.get({ movieId });
     return row === undefined ? undefined : toMovieRecord(row);
   }
+}
+
+/** `node:sqlite` silently accepts unsafe numbers, so windows are checked first. */
+function checkedWindow({ limit, offset }: PageWindow): { limit: number; offset: number } {
+  if (!Number.isSafeInteger(limit) || !Number.isSafeInteger(offset) || limit < 0 || offset < 0) {
+    throw new RangeError('limit and offset must be non-negative safe integers');
+  }
+  return { limit, offset };
+}
+
+/** Inclusive ISO date bounds of a calendar year, e.g. 1999 -> 1999-01-01..1999-12-31. */
+export function yearBounds(year: number): { yearStart: string; yearEnd: string } {
+  if (!Number.isInteger(year) || year < 1 || year > 9999) {
+    throw new RangeError('year must be an integer from 1 to 9999');
+  }
+  const yyyy = String(year).padStart(4, '0');
+  return { yearStart: `${yyyy}-01-01`, yearEnd: `${yyyy}-12-31` };
 }
 
 function integrityError(rowId: unknown, issues: string[]): DataIntegrityError {

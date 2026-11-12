@@ -1,7 +1,7 @@
 import { HttpError } from '../http/errors.js';
-import { PAGE_SIZE, pageWindow, totalPages } from '../http/pagination.js';
+import { paginate } from '../http/pagination.js';
 import type { MovieRepository, RatingSource, RatingStats } from './repository.js';
-import type { MovieDetails, MovieListResponse } from './schemas.js';
+import type { MovieDetails, MovieListResponse, SortOrder } from './schemas.js';
 
 /** A valid movie id that doesn't exist. The central handler turns it into a 404. */
 export class MovieNotFoundError extends HttpError {
@@ -30,18 +30,26 @@ export class MovieService {
   ) {}
 
   /**
-   * One page of all movies. A page past the end returns an empty `data` array with
-   * accurate metadata. Such pages never reach the data query, so no offset is
-   * computed for them, however large the page number.
+   * One page of all movies, by movie id. A page past the end returns an empty
+   * `data` array with accurate metadata and never reaches the data query.
    */
   listMovies(page: number): MovieListResponse {
-    const totalItems = this.repository.countMovies();
-    const pages = totalPages(totalItems);
-    const data = page <= pages ? this.repository.listMovies(pageWindow(page)) : [];
-    return {
-      data,
-      pagination: { page, pageSize: PAGE_SIZE, totalItems, totalPages: pages },
-    };
+    return paginate(page, this.repository.countMovies(), (window) =>
+      this.repository.listMovies(window),
+    );
+  }
+
+  /**
+   * One page of the movies released in `year`, in chronological `sortOrder`
+   * (ties broken by movie id in the same direction). Serves both
+   * `/movies/year/:year` and `/movies?year=`. A year with no movies is an empty
+   * page, not an error.
+   */
+  listMoviesByYear(year: number, page: number, sortOrder: SortOrder): MovieListResponse {
+    const filter = { releaseYear: year };
+    return paginate(page, this.repository.countMovies(filter), (window) =>
+      this.repository.listMoviesByReleaseDate(filter, sortOrder, window),
+    );
   }
 
   /** Details for one movie, with its average rating from the version's rating source. */

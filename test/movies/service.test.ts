@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../../src/http/errors.js';
+import type { PageWindow } from '../../src/http/pagination.js';
 import type { MovieRepository, RatingSource } from '../../src/movies/repository.js';
 import type { MovieRecord, MovieSummary } from '../../src/movies/schemas.js';
 import { averageRating, MovieNotFoundError, MovieService } from '../../src/movies/service.js';
@@ -17,8 +18,10 @@ function fakeRepository(count: number) {
   const all = Array.from({ length: count }, (_, i) => movie(i + 1));
   const repository = {
     countMovies: vi.fn(() => count),
-    listMovies: vi.fn(({ limit, offset }: { limit: number; offset: number }) =>
-      all.slice(offset, offset + limit),
+    listMovies: vi.fn(({ limit, offset }: PageWindow) => all.slice(offset, offset + limit)),
+    listMoviesByReleaseDate: vi.fn(
+      (_filter: unknown, _sortOrder: unknown, { limit, offset }: PageWindow) =>
+        all.slice(offset, offset + limit),
     ),
     findMovieById: vi.fn((): MovieRecord | undefined => undefined),
   } satisfies MovieRepository;
@@ -73,6 +76,39 @@ describe('MovieService.listMovies', () => {
       data: [],
       pagination: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 },
     });
+  });
+});
+
+describe('MovieService.listMoviesByYear', () => {
+  it('counts and lists with the same year filter, passing sortOrder and the page window', () => {
+    const repo = fakeRepository(120);
+    const result = new MovieService(repo, fakeRatings()).listMoviesByYear(1999, 3, 'desc');
+
+    expect(repo.countMovies).toHaveBeenCalledWith({ releaseYear: 1999 });
+    expect(repo.listMoviesByReleaseDate).toHaveBeenCalledWith({ releaseYear: 1999 }, 'desc', {
+      limit: 50,
+      offset: 100,
+    });
+    expect(repo.listMovies).not.toHaveBeenCalled();
+    expect(result.data).toHaveLength(20);
+    expect(result.pagination).toEqual({ page: 3, pageSize: 50, totalItems: 120, totalPages: 3 });
+  });
+
+  it('returns an empty page for a year with no movies, preserving the page', () => {
+    const repo = fakeRepository(0);
+    const result = new MovieService(repo, fakeRatings()).listMoviesByYear(1850, 2, 'asc');
+    expect(result).toEqual({
+      data: [],
+      pagination: { page: 2, pageSize: 50, totalItems: 0, totalPages: 0 },
+    });
+    expect(repo.listMoviesByReleaseDate).not.toHaveBeenCalled();
+  });
+
+  it('never computes an unsafe SQL offset for huge pages', () => {
+    const repo = fakeRepository(120);
+    const service = new MovieService(repo, fakeRatings());
+    expect(service.listMoviesByYear(1999, Number.MAX_SAFE_INTEGER, 'asc').data).toEqual([]);
+    expect(repo.listMoviesByReleaseDate).not.toHaveBeenCalled();
   });
 });
 

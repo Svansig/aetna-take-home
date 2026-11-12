@@ -45,11 +45,34 @@ export function totalPages(totalItems: number): number {
   return Math.ceil(totalItems / PAGE_SIZE);
 }
 
+/** SQL-style LIMIT/OFFSET for one page. */
+export interface PageWindow {
+  readonly limit: number;
+  readonly offset: number;
+}
+
 /** LIMIT/OFFSET for a 1-indexed page. Throws instead of producing an unsafe offset. */
-export function pageWindow(page: number): { limit: number; offset: number } {
+export function pageWindow(page: number): PageWindow {
   const offset = (page - 1) * PAGE_SIZE;
   if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(offset)) {
     throw new RangeError(`Page ${String(page)} cannot be converted to a safe offset`);
   }
   return { limit: PAGE_SIZE, offset };
+}
+
+/**
+ * One page of a list of `totalItems` items, using the shared pagination rules. A
+ * page past the end returns an empty `data` array with accurate metadata, and
+ * `fetch` is not called, so no offset is computed for it however large the page.
+ */
+export function paginate<T>(
+  page: number,
+  totalItems: number,
+  fetch: (window: PageWindow) => T[],
+): { data: T[]; pagination: PaginationMeta } {
+  const pages = totalPages(totalItems);
+  return {
+    data: page <= pages ? fetch(pageWindow(page)) : [],
+    pagination: { page, pageSize: PAGE_SIZE, totalItems, totalPages: pages },
+  };
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { PAGE_SIZE, PageQuerySchema, pageWindow, totalPages } from '../src/http/pagination.js';
+import {
+  PAGE_SIZE,
+  PageQuerySchema,
+  paginate,
+  pageWindow,
+  totalPages,
+} from '../src/http/pagination.js';
 
 describe('PageQuerySchema', () => {
   it('defaults to page 1 when omitted', () => {
@@ -75,4 +81,34 @@ describe('pageWindow', () => {
       expect(() => pageWindow(page)).toThrow(RangeError);
     },
   );
+});
+
+describe('paginate', () => {
+  const items = Array.from({ length: 120 }, (_, i) => i + 1);
+  const fetch = ({ limit, offset }: { limit: number; offset: number }) =>
+    items.slice(offset, offset + limit);
+
+  it('fetches the window for the page and builds the metadata', () => {
+    expect(paginate(3, 120, fetch)).toEqual({
+      data: items.slice(100),
+      pagination: { page: 3, pageSize: 50, totalItems: 120, totalPages: 3 },
+    });
+  });
+
+  it.each([
+    [4, 120],
+    [Number.MAX_SAFE_INTEGER, 120],
+    [1, 0],
+  ])('returns an empty page %d of %d items without fetching', (page, totalItems) => {
+    let called = false;
+    const result = paginate(page, totalItems, () => {
+      called = true;
+      return [];
+    });
+    expect(called).toBe(false);
+    expect(result).toEqual({
+      data: [],
+      pagination: { page, pageSize: 50, totalItems, totalPages: totalPages(totalItems) },
+    });
+  });
 });
