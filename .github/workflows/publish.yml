@@ -1,0 +1,294 @@
+# Publishes the production container image to GHCR after CI succeeds on `main`.
+#
+# Trust model:
+# - Triggered by `workflow_run`, so this file always runs from the default branch,
+#   never from a pull request. Nothing from the triggering run (artifacts, logs,
+#   metadata) is trusted until the `verify` job has checked it.
+# - `verify` (read-only token) confirms the run was the CI workflow, for a push
+#   (not a PR) to `main` of this repository, that it succeeded, and that the
+#   commit SHA is well-formed and reachable from `main`.
+# - Only then does `publish` (packages: write) check out that exact commit, build
+#   it for linux/amd64, smoke-test the image with the read-only fixture databases,
+#   and push it. No artifacts from the CI run are downloaded.
+# - Releases are serialized (concurrency group, never cancelled) and the moving
+#   `production` tag is advanced only if the new commit descends from the commit
+#   currently tagged `production`, so an older run can't overwrite a newer release.
+#
+# Third-party actions are pinned to reviewed commit SHAs (version in the comment).
+name: Publish
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: publish-production
+  cancel-in-progress: false
+
+env:
+  # GHCR package names are lower case.
+  IMAGE: ghcr.io/svansig/aetna-take-home
+  SOURCE_URL: https://github.com/Svansig/aetna-take-home
+
+jobs:
+  verify:
+    name: Verify triggering CI run
+    # Cheap pre-filter; the step below re-checks everything explicitly.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - name: Validate workflow_run metadata
+        id: check
+        env:
+          # Passed through env (never interpolated into the script) because
+          # branch names and other metadata are attacker-influenced strings.
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          RUN_PATH: ${{ github.event.workflow_run.path }}
+          RUN_REPO: ${{ github.event.workflow_run.repository.full_name }}
+          RUN_HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::Refusing to publish: $*"; exit 1; }
+          [[ "$THIS_REPO" == "Svansig/aetna-take-home" ]] || fail "unexpected repository"
+          [[ "$RUN_EVENT" == "push" ]] || fail "triggering event is not a push"
+          [[ "$RUN_CONCLUSION" == "success" ]] || fail "CI did not succeed"
+          [[ "$RUN_BRANCH" == "main" ]] || fail "branch is not main"
+          [[ "$RUN_REPO" == "$THIS_REPO" ]] || fail "run belongs to another repository"
+          [[ "$RUN_HEAD_REPO" == "$THIS_REPO" ]] || fail "head repository is a fork"
+          [[ "$RUN_PATH" == ".github/workflows/ci.yml" || "$RUN_PATH" == ".github/workflows/ci.yml@"* ]] \
+            || fail "triggering workflow is not .github/workflows/ci.yml"
+          [[ "$RUN_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "malformed commit SHA"
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || fail "malformed run id"
+          echo "sha=$RUN_SHA" >> "$GITHUB_OUTPUT"
+          echo "Verified CI run $RUN_ID for $RUN_SHA on main."
+
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Confirm the commit is on main
+        env:
+          SHA: ${{ steps.check.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$SHA" HEAD \
+            || { echo "::error::$SHA is not reachable from main"; exit 1; }
+
+  publish:
+    name: Build, test and push image
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io/svansig/aetna-take-home with GITHUB_TOKEN
+    env:
+      SHA: ${{ needs.verify.outputs.sha }}
+      CI_RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - name: Check out the verified commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          fetch-depth: 0 # ancestry check for the production tag
+          persist-credentials: false
+
+      - name: Confirm checkout matches the verified SHA
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SHA" ]] || { echo "::error::checkout mismatch"; exit 1; }
+
+      - name: Build image (linux/amd64)
+        run: |
+          set -euo pipefail
+          docker build \
+            --platform linux/amd64 \
+            --pull \
+            --label "org.opencontainers.image.source=$SOURCE_URL" \
+            --label "org.opencontainers.image.url=$SOURCE_URL" \
+            --label "org.opencontainers.image.revision=$SHA" \
+            --label "org.opencontainers.image.version=$SHA" \
+            --label "org.opencontainers.image.created=$(git log -1 --format=%cI)" \
+            --label "org.opencontainers.image.title=aetna-take-home" \
+            --label "org.opencontainers.image.description=Movie Services API (read-only SQLite datasets)" \
+            --tag "$IMAGE:$SHA" \
+            .
+
+      - name: Check image contents
+        run: |
+          set -euo pipefail
+          # No databases, env files or dev-only dependencies in the runtime image.
+          docker run --rm --entrypoint sh "$IMAGE:$SHA" -c '
+            set -eu
+            found=$(find /app \( -name "*.db" -o -name "*.sqlite*" -o -name ".env*" \) -print)
+            [ -z "$found" ] || { echo "unexpected files: $found"; exit 1; }
+            for dev in typescript vitest eslint tsx prettier supertest; do
+              [ ! -e "/app/node_modules/$dev" ] || { echo "dev dependency present: $dev"; exit 1; }
+            done
+            [ "$(id -un)" = node ] || { echo "not running as node"; exit 1; }
+          '
+          docker image inspect "$IMAGE:$SHA" \
+            --format 'user={{.Config.User}} healthcheck={{json .Config.Healthcheck.Test}}'
+
+      - name: Refuse to start without databases
+        run: |
+          set -euo pipefail
+          if docker run --rm --read-only "$IMAGE:$SHA" >/dev/null 2>&1; then
+            echo "::error::container started without its databases"; exit 1
+          fi
+
+      - name: Smoke-test image with read-only fixture databases
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke --init \
+            --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+            --health-start-interval 1s \
+            -v "$PWD/db/movies.db:/app/db/movies.db:ro" \
+            -v "$PWD/db/ratings.db:/app/db/ratings.db:ro" \
+            "$IMAGE:$SHA"
+          status=starting
+          for _ in $(seq 1 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' smoke)
+            [[ "$status" == healthy || "$status" == unhealthy ]] && break
+            sleep 1
+          done
+          if [[ "$status" != healthy ]]; then
+            docker logs smoke || true
+            echo "::error::container health is '$status'"; exit 1
+          fi
+          docker exec -i -e SMOKE_BASE_URL=http://127.0.0.1:3000 smoke \
+            node --input-type=module < deploy/smoke-test.js
+          docker rm -f smoke
+
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+
+      - name: Push commit tag and record digest
+        id: push
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE:$SHA"
+          # The registry digest is the SHA-256 of the manifest bytes it serves.
+          digest="sha256:$(docker buildx imagetools inspect --raw "$IMAGE:$SHA" | sha256sum | cut -d' ' -f1)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::could not resolve digest"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Pushed $IMAGE:$SHA as $IMAGE@$digest"
+
+      - name: Advance the production tag (newer commits only)
+        id: promote
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          current=""
+          if out=$(docker pull --quiet "$IMAGE:production" 2>&1); then
+            current=$(docker image inspect "$IMAGE:production" \
+              --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')
+            [[ "$current" =~ ^[0-9a-f]{40}$ ]] \
+              || { echo "::error::production image has no valid revision label"; exit 1; }
+          elif grep -qiE 'not found|manifest unknown' <<<"$out"; then
+            echo "No production tag yet; this is the first release."
+          else
+            echo "::error::cannot read the current production tag: $out"; exit 1
+          fi
+
+          promote=true
+          if [[ -n "$current" ]]; then
+            rc=0; git merge-base --is-ancestor "$current" "$SHA" || rc=$?
+            if [[ $rc -eq 1 ]]; then
+              promote=false
+              echo "::warning::production is at $current, which is not an ancestor of $SHA; leaving it unchanged."
+            elif [[ $rc -ne 0 ]]; then
+              echo "::error::production revision $current is not in this repository's history"; exit 1
+            fi
+          fi
+
+          if [[ "$promote" == true ]]; then
+            docker tag "$IMAGE:$SHA" "$IMAGE:production"
+            docker push "$IMAGE:production"
+            moved="sha256:$(docker buildx imagetools inspect --raw "$IMAGE:production" | sha256sum | cut -d' ' -f1)"
+            [[ "$moved" == "$DIGEST" ]] \
+              || { echo "::error::production resolves to $moved, expected $DIGEST"; exit 1; }
+            echo "production -> $IMAGE@$DIGEST ($SHA)"
+          fi
+          echo "promoted=$promote" >> "$GITHUB_OUTPUT"
+          echo "previous=$current" >> "$GITHUB_OUTPUT"
+
+      - name: Record release
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          PROMOTED: ${{ steps.promote.outputs.promoted }}
+          PREVIOUS: ${{ steps.promote.outputs.previous }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg image "$IMAGE" --arg digest "$DIGEST" --arg commit "$SHA" \
+            --arg ciRun "$CI_RUN_ID" --arg publishRun "$GITHUB_RUN_ID" \
+            --arg promoted "$PROMOTED" --arg previous "$PREVIOUS" \
+            '{image: $image, digest: $digest, reference: ($image + "@" + $digest),
+              commitTag: ($image + ":" + $commit), commit: $commit,
+              productionTagUpdated: ($promoted == "true"),
+              previousProductionCommit: (if $previous == "" then null else $previous end),
+              ciRunId: $ciRun, publishRunId: $publishRun}' > release.json
+          cat release.json
+          {
+            echo "## Release"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Commit | \`$SHA\` |"
+            echo "| Image | \`$IMAGE:$SHA\` |"
+            echo "| Digest | \`$DIGEST\` |"
+            echo "| Pull by digest | \`docker pull $IMAGE@$DIGEST\` |"
+            echo "| \`production\` tag updated | $PROMOTED |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release record
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ needs.verify.outputs.sha }}
+          path: release.json
+          retention-days: 90
+
+      - name: Check anonymous pull access
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          repo="${IMAGE#ghcr.io/}"
+          token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" | jq -r .token) || token=""
+          code=$(curl -s -o /dev/null -w '%{http_code}' -I \
+            -H "Authorization: Bearer ${token}" \
+            -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json" \
+            "https://ghcr.io/v2/${repo}/manifests/${DIGEST}")
+          if [[ "$code" == 200 ]]; then
+            echo "Anonymous pull of $IMAGE@$DIGEST works (package is public)."
+          else
+            echo "::warning::Anonymous pull returned HTTP $code. Make the GHCR package public (see README: Image publishing); the production host pulls anonymously."
+          fi
+
+      - name: Log out of GHCR
+        if: always()
+        run: docker logout ghcr.io || true

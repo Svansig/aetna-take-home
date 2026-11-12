@@ -1,0 +1,16 @@
+[Unit]
+Description=Movie Services API release updater (pull-based, GHCR -> aetna-api)
+Documentation=https://github.com/Svansig/aetna-take-home/blob/main/docs/DEPLOYMENT.md
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aetna/bin/aetna-update check
+SyslogIdentifier=aetna-update
+# Pull + health wait + smoke test + possible rollback, with margin.
+TimeoutStartSec=15min
+NoNewPrivileges=yes
+PrivateTmp=yes
+UMask=0022
