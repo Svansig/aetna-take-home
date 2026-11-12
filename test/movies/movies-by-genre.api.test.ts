@@ -11,6 +11,7 @@ import {
   createTestApp,
   createTestVersions,
   suppliedMoviesDb,
+  usd,
 } from '../helpers.js';
 
 const { app } = createTestApp();
@@ -28,7 +29,7 @@ async function getList(url: string, testApp = app): Promise<MovieListResponse> {
   expect(res.status, url).toBe(200);
   for (const movie of res.body.data as object[]) {
     expect(Object.keys(movie).sort()).toEqual(
-      ['budget', 'genres', 'imdbId', 'releaseDate', 'title'].sort(),
+      ['budget', 'genres', 'imdbId', 'movieId', 'releaseDate', 'title'].sort(),
     );
   }
   // The shared strict MovieSummarySchema rejects any extra field.
@@ -85,12 +86,13 @@ function oracle(
         ? sign * (a.releaseDate < b.releaseDate ? -1 : 1)
         : sign * (a.movieId - b.movieId),
     )
-    .map(({ imdbId, title, genres, releaseDate, budget }) => ({
+    .map(({ movieId, imdbId, title, genres, releaseDate, budget }) => ({
+      movieId,
       imdbId,
       title,
       genres,
       releaseDate: releaseDate === '' ? null : releaseDate,
-      budget,
+      budget: usd(budget),
     }));
 }
 
@@ -156,7 +158,7 @@ describe('movies by genre (supplied database)', () => {
     expect(movies).toEqual(oracle(10770, { by: 'movieId', order: 'asc' }));
     expect(movies.flatMap((m) => m.genres).some((g) => g.name === 'TV Movie')).toBe(true);
     expect(movies.flatMap((m) => m.genres).some((g) => g.name === 'tv movie')).toBe(false);
-    expect(movies.some((m) => m.budget === 0)).toBe(true);
+    expect(movies.some((m) => m.budget === '$0')).toBe(true);
   });
 
   it('returns 200 with an empty page past the end', async () => {

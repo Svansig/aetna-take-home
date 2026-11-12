@@ -14,6 +14,9 @@ dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.m
 > and ratings databases use different movie id systems (TMDB vs MovieLens), and V1
 > deliberately matches them by the raw number. See
 > [V1 ratings: the identifier mismatch](#v1-ratings-the-identifier-mismatch).
+>
+> Every interpretation of the brief made during implementation is recorded in
+> [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
 
 ## Implemented vs. planned
 
@@ -31,8 +34,8 @@ dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.m
 | **US1 List All Movies:** `GET /api/v1/movies`                                            | ✅ Implemented (V1 only)                     |
 | **US2 Movie Details:** `GET /api/v1/movies/{movieId}`                                    | ✅ Implemented (V1 only, naive ratings join) |
 | **US3 Movies By Year:** `GET /api/v1/movies/year/{year}`, `GET /api/v1/movies?year=`     | ✅ Implemented (V1 only)                     |
-| Correct movie ↔ rating id mapping                                                        | ⏳ Planned for V2                            |
 | **US4 Movies By Genre:** `GET /api/v1/movies/genre/{genre}`, `GET /api/v1/movies?genre=` | ✅ Implemented (V1 only)                     |
+| Correct movie ↔ rating id mapping                                                        | ⏳ Planned for V2                            |
 | Combined `year` + `genre` filtering, `sortOrder` on every listing                        | ✅ Implemented (V1 only)                     |
 | `/api/v2` (rebuilt dataset)                                                              | ⏳ Mounted, with no operations (returns 404) |
 | V2 dataset rebuilt from Kaggle sources                                                   | ⏳ Planned                                   |
@@ -140,8 +143,8 @@ movies. An invalid `sortOrder` (`bogus`, `ASC`, empty) is a `400` on every listi
 **Pagination**
 
 - The page size is fixed at 50 and can't be changed by clients.
-- Results are ordered by the internal `movieId` (TMDB id), ascending. The order
-  is deterministic, which offset pagination needs, but has no meaning to clients.
+- Results follow the [sorting](#sorting-every-listing) rules above. Every order
+  ends in `movieId`, so it is deterministic, which offset pagination needs.
 - A page past the end returns `200` with `data: []`. The requested `page` is kept
   and `totalItems` and `totalPages` stay accurate. An empty collection has
   `totalPages: 0`.
@@ -159,6 +162,7 @@ movies. An invalid `sortOrder` (`bogus`, `ASC`, empty) is a `400` on every listi
 {
   "data": [
     {
+      "movieId": 5,
       "imdbId": "tt0113101",
       "title": "Four Rooms",
       "genres": [
@@ -166,7 +170,7 @@ movies. An invalid `sortOrder` (`bogus`, `ASC`, empty) is a `400` on every listi
         { "id": 35, "name": "Comedy" }
       ],
       "releaseDate": "1995-12-09",
-      "budget": 4000000
+      "budget": "$4,000,000"
     }
   ],
   "pagination": { "page": 1, "pageSize": 50, "totalItems": 45430, "totalPages": 909 }
@@ -175,15 +179,16 @@ movies. An invalid `sortOrder` (`bogus`, `ASC`, empty) is a `400` on every listi
 
 (This is a real record from the supplied database. A real page has 50 entries.)
 
-| Field         | Type                             | Notes                                                                                            |
-| ------------- | -------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `imdbId`      | string                           | As stored. 17 source records have an empty string (see limitations).                             |
-| `title`       | string                           |                                                                                                  |
-| `genres`      | `{ id: number, name: string }[]` | Parsed from the stored JSON. May be empty (2,442 movies).                                        |
-| `releaseDate` | string \| null                   | `YYYY-MM-DD` exactly as stored, never converted to a timestamp. `null` when missing (84 movies). |
-| `budget`      | integer                          | Whole **US dollars**, as stored, with no scaling or formatting. `0` stays `0`.                   |
+| Field         | Type                             | Notes                                                                                                                                       |
+| ------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `movieId`     | integer                          | The movie's id in `movies.db` (a TMDB id). Pass it to [`GET /api/v1/movies/{movieId}`](#get-apiv1moviesmovieid-movie-details-user-story-2). |
+| `imdbId`      | string                           | As stored. 17 source records have an empty string (see limitations).                                                                        |
+| `title`       | string                           |                                                                                                                                             |
+| `genres`      | `{ id: number, name: string }[]` | Parsed from the stored JSON. May be empty (2,442 movies).                                                                                   |
+| `releaseDate` | string \| null                   | `YYYY-MM-DD` exactly as stored, never converted to a timestamp. `null` when missing (84 movies).                                            |
+| `budget`      | string                           | **Whole US dollars**: dollar sign and thousands separators, no decimals (`"$4,000,000"`). A stored `0` is `"$0"`.                           |
 
-Each movie has exactly these five fields, and `pagination` has exactly the four
+Each movie has exactly these six fields, and `pagination` has exactly the four
 shown. Both are enforced by strict Zod schemas, which also generate the OpenAPI
 components `MovieSummary`, `Genre`, `PaginationMeta` and `MovieListResponse`.
 
@@ -214,22 +219,23 @@ digits, at most 2^53−1, with leading zeros allowed (`011` means 11).
 | `404`  | `MOVIE_NOT_FOUND`: the id is valid but no movie has it (for example, `1`).                                 |
 | `500`  | `INTERNAL_ERROR`: an unexpected error, such as malformed stored genres. Details are only logged.           |
 
-**Response:** exactly these ten fields, not wrapped in the pagination envelope.
+**Response:** exactly these eleven fields, not wrapped in the pagination envelope.
 
 | Field                 | Type             | Source                       | Notes                                                                                                                  |
 | --------------------- | ---------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `movieId`             | integer          | `movies.movieId`             | Same as the listing and the path parameter.                                                                            |
 | `imdbId`              | string           | `movies.imdbId`              | Same as the listing. `""` for 17 source records.                                                                       |
 | `title`               | string           | `movies.title`               |                                                                                                                        |
 | `description`         | string \| null   | `movies.overview`            | Verbatim. `null` when the source is empty (959 movies).                                                                |
 | `releaseDate`         | string \| null   | `movies.releaseDate`         | Same as the listing: `YYYY-MM-DD` or `null`.                                                                           |
-| `budget`              | integer          | `movies.budget`              | Whole US dollars, as stored. `0` stays `0` and often means "not recorded".                                             |
+| `budget`              | string           | `movies.budget`              | Same format as the listing (`"$11,000,000"`). `"$0"` often means "not recorded".                                       |
 | `runtime`             | number \| null   | `movies.runtime`             | Minutes, as stored (not rounded). `null` for the 257 movies stored with an empty value.                                |
 | `averageRating`       | number \| null   | `ratings.db`                 | Mean on a 0.5–5.0 scale, rounded to 2 decimals. `null` (never `0`) when no ratings match. **See the V1 caveat below.** |
 | `genres`              | `{ id, name }[]` | `movies.genres`              | Same parsing as the listing.                                                                                           |
 | `originalLanguage`    | string \| null   | `movies.language`            | Always `null` in V1: the column is empty for all 45,430 movies.                                                        |
 | `productionCompanies` | `{ id, name }[]` | `movies.productionCompanies` | `[]` for the 483 movies whose stored JSON is malformed (see below).                                                    |
 
-The five fields shared with the listing come from the same Zod schema
+The six fields shared with the listing come from the same Zod schema
 (`MovieDetailsSchema = MovieSummarySchema.extend(...)`), so the two contracts
 can't drift.
 
@@ -303,7 +309,7 @@ matching movies. A valid year with no movies (for example `1850`, `0001` or
 the requested `page`. It is never a 404. A page past the end also returns `200`
 with `data: []`.
 
-**Response.** The same `MovieListResponse` envelope and five-field
+**Response.** The same `MovieListResponse` envelope and six-field
 `MovieSummary` items as the unfiltered listing. `releaseDate` stays
 `string | null` in the schema for consistency, but is always a date here.
 
@@ -648,6 +654,7 @@ src/
 test/                  Vitest + Supertest suites and helpers
 .github/workflows/     ci.yml (validation), publish.yml (GHCR release after CI on main)
 deploy/                Production: Compose files, host updater, systemd units, smoke test
+docs/ASSUMPTIONS.md    Interpretations of the brief made during implementation
 docs/DEPLOYMENT.md     Production runbook
 db/                    Supplied SQLite databases (read-only, never modified)
 kaggle/                Kaggle source CSVs for the future V2 rebuild (git- and docker-ignored)
@@ -757,6 +764,12 @@ behaviour is the same. Only data access differs. Each version is an `ApiVersion`
   That's acceptable for this assignment, so there's no caching. If it mattered,
   V2's rebuilt database could store genres in their own indexed table.
 
+- **Budgets are formatted in the service, not the repository.** Repositories
+  return the stored whole-dollar integer (`MovieSummaryRecord`), and
+  `MovieService` turns it into the public string with `formatUsd`
+  (`Intl.NumberFormat`, fixed to `en-US`/`USD`, so the host locale never
+  matters). V2 repositories get the same formatting for free, and the public
+  schema checks every value against `$#,###` (no cents).
 - **Stored data is validated, never repaired.** Each row is checked with Zod and
   its genre JSON is parsed in the repository. Anything unexpected raises a
   `DataIntegrityError`, which the central handler logs (with the row id and failing
@@ -788,8 +801,8 @@ behaviour is the same. Only data access differs. Each version is an `ApiVersion`
 - V1 returns the supplied data as-is, including these issues:
   - **17 movies have an empty `imdbId` (`""`).** It's returned unchanged, so
     treat `""` as "unknown".
-  - **36,550 movies (about 80%) have `budget: 0`.** V1 can't tell "unknown"
-    apart from a real zero, so it returns `0` as stored.
+  - **36,550 movies (about 80%) have a stored budget of 0.** V1 can't tell
+    "unknown" apart from a real zero, so it returns `"$0"`.
   - **84 movies have no release date.** It's returned as `null`.
   - **All 45,430 movies have no language.** `originalLanguage` is always `null`.
     V2 is planned to restore it from the upstream data.

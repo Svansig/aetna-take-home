@@ -1,5 +1,5 @@
 import type { PageWindow } from '../http/pagination.js';
-import type { GenreRef, MovieRecord, MovieSummary, SortOrder } from './schemas.js';
+import type { GenreRef, MovieRecord, MovieSummaryRecord, SortOrder } from './schemas.js';
 
 /** Conditions narrowing a movie listing. Present conditions are combined with AND. */
 export interface MovieFilter {
@@ -21,13 +21,14 @@ export interface MovieSort {
 /**
  * Movie data access used by `MovieService`. Each API version supplies its own
  * implementation (V1: original SQLite database). Implementations return
- * validated application records and order results deterministically.
+ * validated application records (budgets as whole-dollar integers; the service
+ * formats them) and order results deterministically.
  */
 export interface MovieRepository {
   /** Number of movies matching `filter` (`{}` counts all). */
   countMovies(filter: MovieFilter): number;
   /** One window of the movies matching `filter`, in `sort` order. */
-  listMovies(filter: MovieFilter, sort: MovieSort, window: PageWindow): MovieSummary[];
+  listMovies(filter: MovieFilter, sort: MovieSort, window: PageWindow): MovieSummaryRecord[];
   /** Whether any movie in this version's data has the genre. */
   hasGenre(genre: GenreRef): boolean;
   /** One movie by its numeric `movieId`, or `undefined` if there is none. */
