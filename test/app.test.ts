@@ -61,6 +61,7 @@ describe('API documentation', () => {
       '/health',
       '/api/v1/movies',
       '/api/v1/movies/year/{year}',
+      '/api/v1/movies/genre/{genre}',
       '/api/v1/movies/{movieId}',
     ]);
   });

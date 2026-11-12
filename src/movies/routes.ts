@@ -6,9 +6,10 @@ import type { ApiVersionId } from '../versions.js';
 import {
   MovieDetailsSchema,
   MovieIdParamsSchema,
-  MovieListQueryDocSchema,
+  MovieGenreParamsSchema,
   MovieListQuerySchema,
   MovieListResponseSchema,
+  MoviesByGenreQuerySchema,
   MoviesByYearQuerySchema,
   MovieYearParamsSchema,
   type MovieDetails,
@@ -20,26 +21,28 @@ import type { MovieService } from './service.js';
 export function createMoviesRouter(service: MovieService): Router {
   const router = Router();
 
-  // ZodErrors thrown while parsing become 400s in the central error handler.
+  // Every handler validates all of its parameters before calling the service, so
+  // a ZodError (400, via the central error handler) always wins over a 404. All
+  // listing URLs share `service.listMovies`.
 
   router.get('/movies', (req, res) => {
-    const { page, year } = MovieListQuerySchema.parse(req.query);
-    if (year === undefined) {
-      // Unfiltered: movieId order. `sortOrder` is not read, like any unknown parameter.
-      res.json(service.listMovies(page));
-      return;
-    }
-    const { sortOrder } = MoviesByYearQuerySchema.parse(req.query);
-    res.json(service.listMoviesByYear(year, page, sortOrder));
+    const { page, sortOrder, year, genre } = MovieListQuerySchema.parse(req.query);
+    res.json(service.listMovies({ page, sortOrder, releaseYear: year, genre }));
   });
 
-  // Registered before `/movies/:movieId` so `/movies/year/...` never reaches it.
-  // `{/:year}` is optional so a missing year is a `year` validation error, not a
-  // `movieId` one from the details route.
+  // The year and genre routes are registered before `/movies/:movieId` so their
+  // paths never reach it. The optional `{/:param}` segment turns a missing value
+  // into a validation error for that parameter rather than a `movieId` one.
   router.get('/movies/year{/:year}', (req, res) => {
     const { year } = MovieYearParamsSchema.parse(req.params);
     const { page, sortOrder } = MoviesByYearQuerySchema.parse(req.query);
-    res.json(service.listMoviesByYear(year, page, sortOrder));
+    res.json(service.listMovies({ page, sortOrder, releaseYear: year }));
+  });
+
+  router.get('/movies/genre{/:genre}', (req, res) => {
+    const { genre } = MovieGenreParamsSchema.parse(req.params);
+    const { page, sortOrder } = MoviesByGenreQuerySchema.parse(req.query);
+    res.json(service.listMovies({ page, sortOrder, genre }));
   });
 
   router.get('/movies/:movieId', (req, res) => {
@@ -176,6 +179,92 @@ export const V1_EMPTY_YEAR_EXAMPLE = {
 } satisfies { year: number; response: MovieListResponse };
 
 /**
+ * Genre and combined-filter pages from the supplied V1 database, verbatim (first
+ * three movies of page 1). A test checks them against the database.
+ */
+export const V1_GENRE_EXAMPLES = {
+  action: {
+    data: [
+      {
+        imdbId: 'tt0107286',
+        title: 'Judgment Night',
+        genres: [
+          { id: 28, name: 'Action' },
+          { id: 53, name: 'Thriller' },
+          { id: 80, name: 'Crime' },
+        ],
+        releaseDate: '1993-10-15',
+        budget: 0,
+      },
+      {
+        imdbId: 'tt0076759',
+        title: 'Star Wars',
+        genres: [
+          { id: 12, name: 'Adventure' },
+          { id: 28, name: 'Action' },
+          { id: 878, name: 'Science Fiction' },
+        ],
+        releaseDate: '1977-05-25',
+        budget: 11000000,
+      },
+      {
+        imdbId: 'tt0119116',
+        title: 'The Fifth Element',
+        genres: [
+          { id: 12, name: 'Adventure' },
+          { id: 14, name: 'Fantasy' },
+          { id: 28, name: 'Action' },
+          { id: 53, name: 'Thriller' },
+          { id: 878, name: 'Science Fiction' },
+        ],
+        releaseDate: '1997-05-07',
+        budget: 90000000,
+      },
+    ],
+    pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 6590, totalPages: 132 },
+  },
+  action1999: {
+    data: [
+      {
+        imdbId: 'tt0223530',
+        title: 'Nowhere to Hide',
+        genres: [
+          { id: 28, name: 'Action' },
+          { id: 35, name: 'Comedy' },
+          { id: 80, name: 'Crime' },
+        ],
+        releaseDate: '1999-01-01',
+        budget: 0,
+      },
+      {
+        imdbId: 'tt0181838',
+        title: 'Stealth Fighter',
+        genres: [
+          { id: 28, name: 'Action' },
+          { id: 53, name: 'Thriller' },
+        ],
+        releaseDate: '1999-01-01',
+        budget: 0,
+      },
+      {
+        imdbId: 'tt0203082',
+        title: 'Samurai X: Trust & Betrayal',
+        genres: [
+          { id: 16, name: 'Animation' },
+          { id: 28, name: 'Action' },
+          { id: 12, name: 'Adventure' },
+          { id: 18, name: 'Drama' },
+          { id: 10749, name: 'Romance' },
+        ],
+        releaseDate: '1999-01-01',
+        budget: 0,
+      },
+    ],
+    pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 100, totalPages: 2 },
+  },
+} satisfies Record<string, MovieListResponse>;
+
+/**
  * Real V1 detail responses, verbatim. A test checks them against the supplied
  * databases. Star Wars shows the naive rating association: 3.69 comes from
  * MovieLens movie 11, while Star Wars' real MovieLens id 260 averages 4.22.
@@ -241,6 +330,9 @@ export function registerMoviesDocs(
     description: 'Unexpected error. Details are logged server-side, never returned.',
     content: { 'application/json': { schema: ErrorResponseSchema } },
   };
+  const notFoundError = (message: string) => ({
+    error: { code: 'GENRE_NOT_FOUND', message, requestId: '6f1c1c3e-2b8e-4d55-9b0c-2f1f5a3c9e21' },
+  });
   const yearExamples = {
     year1999: {
       summary: '1999, ascending (default): first 3 of 50 movies on page 1',
@@ -255,40 +347,90 @@ export function registerMoviesDocs(
       value: V1_EMPTY_YEAR_EXAMPLE.response,
     },
   };
+  const genreExample = {
+    action: {
+      summary: 'Action (or 28, or action): first 3 of 50 movies on page 1, by movieId',
+      value: V1_GENRE_EXAMPLES.action,
+    },
+  };
+  const unknownGenre = {
+    description: 'Valid `genre`, but no movie has it.',
+    content: {
+      'application/json': {
+        schema: ErrorResponseSchema,
+        examples: {
+          name: { value: notFoundError('Genre "Space Western" not found') },
+          id: { value: notFoundError('Genre 99999 not found') },
+        },
+      },
+    },
+  };
   const yearRules = [
     '* `year` is exactly four digits, `0001` to `9999` (e.g. `1999`, `0001`). Anything',
-    '  else (`99`, `10000`, `-1999`, `1999.5`, `abc`, empty) is a `400`.',
-    '* Results are chronological: `releaseDate` ascending by default, then `movieId`',
-    '  ascending for movies released on the same day. `sortOrder=desc` reverses both,',
-    '  so page boundaries are deterministic in either direction.',
-    '* Movies without a release date never match a year.',
-    '* `totalItems` and `totalPages` count only the matching movies. A valid year with no',
-    '  movies returns `200` with `data: []`, `totalItems: 0` and `totalPages: 0`.',
+    '  else (`99`, `10000`, `-1999`, `1999.5`, `abc`, empty) is a `400`. Movies without a',
+    '  release date never match a year.',
   ];
+  const genreRules = [
+    '* `genre` made only of decimal digits is a genre id (`28`); it must be from 1 to',
+    '  2^53−1 or the request is a `400`. Anything else is a genre name (`Action`,',
+    '  `Science Fiction`), matched exactly except for ASCII letter case (`action` and',
+    '  `ACTION` work; `Act` does not). An empty name is a `400`.',
+    '* A genre no movie has is a `404 GENRE_NOT_FOUND`. A known genre with nothing',
+    '  matching the other filters is a `200` with `data: []`.',
+    '* Responses keep the stored genre names; the query value only selects movies.',
+  ];
+  const listRules = (repeatable: string) => [
+    '* `totalItems` and `totalPages` count only the matching movies. No matches returns',
+    '  `200` with `data: []`, `totalItems: 0` and `totalPages: 0`.',
+    '* `page` is 1-indexed and defaults to 1. The page size is fixed. A page past the',
+    '  end returns `200` with `data: []` and accurate `pagination`.',
+    '* `budget` is in whole US dollars. `releaseDate` is a `YYYY-MM-DD` date or `null`.',
+    `* Unknown query parameters are ignored. A repeated ${repeatable} is a \`400\`.`,
+  ];
+  const badRequest = (examples: Record<string, [string, string]>) => ({
+    description: 'An invalid parameter (all parameters are validated before any lookup).',
+    content: {
+      'application/json': {
+        schema: ErrorResponseSchema,
+        examples: Object.fromEntries(
+          Object.entries(examples).map(([key, [path, message]]) => [
+            key,
+            { value: validationError(path, message) },
+          ]),
+        ),
+      },
+    },
+  });
+  const YEAR_400: [string, string] = ['year', 'year must be a four-digit year from 0001 to 9999'];
+  const GENRE_400: [string, string] = ['genre', 'genre must not be empty'];
+  const SORT_400: [string, string] = ['sortOrder', 'sortOrder must be "asc" or "desc"'];
 
   registry.registerPath({
     method: 'get',
     path: `${basePath}/movies`,
     operationId: `listMovies${version.toUpperCase()}`,
     tags: [tag],
-    summary: 'List all movies, optionally for one release year',
+    summary: 'List movies, optionally filtered by year and/or genre',
     description: [
-      `Returns every movie, ${String(PAGE_SIZE)} per page, ordered by the internal movie id`,
-      '(ascending). The order is stable but has no meaning to clients.',
+      `Returns movies, ${String(PAGE_SIZE)} per page. With no filters, that is every movie.`,
+      '`year` and `genre` are optional and combine with AND: `?year=1999&genre=Action`',
+      'lists the Action movies released in 1999.',
       '',
-      'With `year`, returns only the movies released that year, in chronological order,',
-      'exactly like `GET /movies/year/{year}` with the same `page` and `sortOrder`.',
-      '`sortOrder` only applies together with `year`; without it, it is ignored.',
+      '**Order** (`sortOrder` is `asc` by default, or `desc`):',
+      '',
+      '* Without `year`, by the internal `movieId`. The order is stable but has no',
+      '  meaning to clients.',
+      '* With `year`, chronological: `releaseDate`, then `movieId` for movies released on',
+      '  the same day, both in the `sortOrder` direction.',
+      '',
+      'Equivalent to `GET /movies/year/{year}` (only `year`) and `GET /movies/genre/{genre}`',
+      '(only `genre`) with the same `page` and `sortOrder`.',
       '',
       ...yearRules,
-      '',
-      '* `page` is 1-indexed and defaults to 1. The page size is fixed.',
-      '* A page past the end returns `200` with `data: []` and accurate `pagination`.',
-      '* `budget` is in whole US dollars. `releaseDate` is a `YYYY-MM-DD` date or `null`.',
-      '* Unknown query parameters are ignored. A repeated `page`, `year` or `sortOrder`',
-      '  is rejected.',
+      ...genreRules,
+      ...listRules('`page`, `year`, `genre` or `sortOrder`'),
     ].join('\n'),
-    request: { query: MovieListQueryDocSchema },
+    request: { query: MovieListQuerySchema },
     responses: {
       200: {
         description: 'One page of movies.',
@@ -297,7 +439,7 @@ export function registerMoviesDocs(
             schema: MovieListResponseSchema,
             examples: {
               firstPage: {
-                summary: 'Page 1 (truncated here to its first 3 of 50 movies)',
+                summary: 'No filters, page 1 (first 3 of 50 movies)',
                 value: V1_FIRST_PAGE_EXAMPLE,
               },
               pastTheEnd: {
@@ -305,24 +447,22 @@ export function registerMoviesDocs(
                 value: { data: [], pagination: { ...totals, page: 1000 } },
               },
               ...yearExamples,
-            },
-          },
-        },
-      },
-      400: {
-        description: 'Invalid `page`, `year` or `sortOrder` parameter.',
-        content: {
-          'application/json': {
-            schema: ErrorResponseSchema,
-            examples: {
-              page: { value: validationError('page', 'page must be at least 1') },
-              year: {
-                value: validationError('year', 'year must be a four-digit year from 0001 to 9999'),
+              ...genreExample,
+              action1999: {
+                summary: 'year=1999&genre=Action: first 3 of 50 movies on page 1',
+                value: V1_GENRE_EXAMPLES.action1999,
               },
             },
           },
         },
       },
+      400: badRequest({
+        page: ['page', 'page must be at least 1'],
+        year: YEAR_400,
+        genre: GENRE_400,
+        sortOrder: SORT_400,
+      }),
+      404: unknownGenre,
       500: serverError,
     },
   });
@@ -335,14 +475,12 @@ export function registerMoviesDocs(
     summary: 'List movies released in a year',
     description: [
       `Returns the movies released in \`year\`, ${String(PAGE_SIZE)} per page, in chronological`,
-      'order. Equivalent to `GET /movies?year={year}` with the same `page` and `sortOrder`.',
+      'order: `releaseDate`, then `movieId` for movies released on the same day, both',
+      'ascending by default or descending with `sortOrder=desc`. Equivalent to',
+      '`GET /movies?year={year}` with the same `page` and `sortOrder`.',
       '',
       ...yearRules,
-      '',
-      '* `page` is 1-indexed and defaults to 1. The page size is fixed.',
-      '* A page past the end returns `200` with `data: []` and accurate `pagination`.',
-      '* `budget` is in whole US dollars. `releaseDate` is a `YYYY-MM-DD` date.',
-      '* Unknown query parameters are ignored. A repeated `page` or `sortOrder` is rejected.',
+      ...listRules('`page` or `sortOrder`'),
     ].join('\n'),
     request: { params: MovieYearParamsSchema, query: MoviesByYearQuerySchema },
     responses: {
@@ -352,22 +490,38 @@ export function registerMoviesDocs(
           'application/json': { schema: MovieListResponseSchema, examples: yearExamples },
         },
       },
-      400: {
-        description: 'Invalid `year`, `page` or `sortOrder` parameter.',
+      400: badRequest({ year: YEAR_400, sortOrder: SORT_400 }),
+      500: serverError,
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: `${basePath}/movies/genre/{genre}`,
+    operationId: `listMoviesByGenre${version.toUpperCase()}`,
+    tags: [tag],
+    summary: 'List movies in a genre',
+    description: [
+      `Returns the movies that have \`genre\`, ${String(PAGE_SIZE)} per page, by \`movieId\``,
+      '(ascending by default, descending with `sortOrder=desc`). Equivalent to',
+      '`GET /movies?genre={genre}` with the same `page` and `sortOrder`.',
+      '',
+      ...genreRules,
+      ...listRules('`page` or `sortOrder`'),
+    ].join('\n'),
+    request: { params: MovieGenreParamsSchema, query: MoviesByGenreQuerySchema },
+    responses: {
+      200: {
+        description: 'One page of the movies in the genre.',
         content: {
-          'application/json': {
-            schema: ErrorResponseSchema,
-            examples: {
-              year: {
-                value: validationError('year', 'year must be a four-digit year from 0001 to 9999'),
-              },
-              sortOrder: {
-                value: validationError('sortOrder', 'sortOrder must be "asc" or "desc"'),
-              },
-            },
-          },
+          'application/json': { schema: MovieListResponseSchema, examples: genreExample },
         },
       },
+      400: badRequest({
+        genreId: ['genre', 'genre id must be a positive integer no larger than 2^53-1'],
+        sortOrder: SORT_400,
+      }),
+      404: unknownGenre,
       500: serverError,
     },
   });

@@ -50,23 +50,58 @@ export type MovieListResponse = z.infer<typeof MovieListResponseSchema>;
 
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 
-/** Chronological direction for year-filtered listings. Case-sensitive. */
+/** Listing direction. Case-sensitive. */
 export type SortOrder = (typeof SORT_ORDERS)[number];
 
-const sortOrderParam = z
-  .enum(SORT_ORDERS, {
-    error: singleValueError('sortOrder', 'sortOrder must be "asc" or "desc"'),
-  })
-  .default('asc');
+const sortOrderParam = (description: string) =>
+  z
+    .enum(SORT_ORDERS, {
+      error: singleValueError('sortOrder', 'sortOrder must be "asc" or "desc"'),
+    })
+    .default('asc')
+    .meta({ description });
 
-const SORT_ORDER_DESCRIPTION =
-  'Chronological direction. `asc` (default): `releaseDate` ascending, then `movieId` ' +
-  'ascending for movies released on the same day. `desc`: `releaseDate` descending, ' +
-  'then `movieId` descending. Case-sensitive.';
+const SORT_BY_ID = '`asc` (default) or `desc` by `movieId`.';
+const SORT_BY_DATE =
+  '`asc` (default): `releaseDate` ascending, then `movieId` ascending for movies released ' +
+  'on the same day. `desc`: `releaseDate` descending, then `movieId` descending.';
 
 const YEAR_DESCRIPTION =
   'Release year as exactly four digits, `0001` to `9999`. A valid year with no movies ' +
   'returns an empty page, not a 404.';
+
+/**
+ * A genre reference as parsed from a request: all decimal digits is a TMDB genre
+ * id, anything else is a genre name (matched case-insensitively, exactly otherwise).
+ */
+export type GenreRef = { readonly id: number } | { readonly name: string };
+
+const genreParam = () =>
+  z
+    .string({ error: singleValueError('genre', 'genre must be a genre id or name') })
+    .transform((value, ctx): GenreRef => {
+      if (/^\d+$/.test(value)) {
+        const id = Number(value);
+        if (id >= 1 && Number.isSafeInteger(id)) return { id };
+        ctx.addIssue({
+          code: 'custom',
+          message: 'genre id must be a positive integer no larger than 2^53-1',
+        });
+        return z.NEVER;
+      }
+      if (value.trim() === '') {
+        ctx.addIssue({ code: 'custom', message: 'genre must not be empty' });
+        return z.NEVER;
+      }
+      return { name: value };
+    });
+
+const GENRE_PARAM_DOC = { type: 'string', minLength: 1 } as const;
+
+const GENRE_DESCRIPTION =
+  'A genre id (all digits, e.g. `28`) or a genre name (e.g. `Action`, `science fiction`). ' +
+  'Names match case-insensitively but otherwise exactly: no partial matches. An unknown ' +
+  'genre is a 404.';
 
 /** `/movies/year/:year` path parameter. */
 export const MovieYearParamsSchema = z.object({
@@ -77,32 +112,44 @@ export const MovieYearParamsSchema = z.object({
   }),
 });
 
-/** Query for `/movies/year/:year`: the shared `page` plus `sortOrder`. Unknown keys are ignored. */
+/** `/movies/genre/:genre` path parameter. */
+export const MovieGenreParamsSchema = z.object({
+  genre: genreParam().meta({
+    ...GENRE_PARAM_DOC,
+    description: GENRE_DESCRIPTION,
+    example: 'Action',
+  }),
+});
+
+/** Query for `/movies/year/:year`: `page` and chronological `sortOrder`. Unknown keys are ignored. */
 export const MoviesByYearQuerySchema = PageQuerySchema.extend({
-  sortOrder: sortOrderParam.meta({ description: SORT_ORDER_DESCRIPTION }),
+  sortOrder: sortOrderParam(SORT_BY_DATE),
+});
+
+/** Query for `/movies/genre/:genre`: `page` and `sortOrder` by movieId. Unknown keys are ignored. */
+export const MoviesByGenreQuerySchema = PageQuerySchema.extend({
+  sortOrder: sortOrderParam(SORT_BY_ID),
 });
 
 /**
- * Query for `/movies`: the shared `page` plus an optional `year` filter. `sortOrder`
- * is not part of this schema, because it only applies once `year` is present; the
- * route then reads it with `MoviesByYearQuerySchema`. Without `year` it stays an
- * ignored unknown parameter, as before.
+ * Query for `/movies`: `page`, `sortOrder` and the optional `year` and `genre`
+ * filters, combined with AND. Unknown keys are ignored.
  */
 export const MovieListQuerySchema = PageQuerySchema.extend({
-  // No `example`: Swagger UI would pre-fill it and turn "list all" into a filtered request.
+  // No `example` on the filters: Swagger UI would pre-fill it and turn "list all"
+  // into a filtered request.
   year: fourDigitYearParam('year')
     .optional()
     .meta({
       ...FOUR_DIGIT_YEAR_PARAM_DOC,
-      description: `Optional filter. ${YEAR_DESCRIPTION} Omit it to list all movies.`,
+      description: `Optional filter. ${YEAR_DESCRIPTION}`,
     }),
-});
-
-/** OpenAPI-only view of the `/movies` query, including the year-only `sortOrder`. */
-export const MovieListQueryDocSchema = MovieListQuerySchema.extend({
-  sortOrder: sortOrderParam.meta({
-    description: `Only applies together with \`year\`; ignored otherwise. ${SORT_ORDER_DESCRIPTION}`,
-  }),
+  genre: genreParam()
+    .optional()
+    .meta({ ...GENRE_PARAM_DOC, description: `Optional filter. ${GENRE_DESCRIPTION}` }),
+  sortOrder: sortOrderParam(
+    `Without \`year\`: ${SORT_BY_ID} With \`year\` (chronological): ${SORT_BY_DATE}`,
+  ),
 });
 
 /** `:movieId` path parameter: the numeric id from movies.db, not an IMDb id. */

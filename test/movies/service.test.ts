@@ -3,7 +3,13 @@ import { HttpError } from '../../src/http/errors.js';
 import type { PageWindow } from '../../src/http/pagination.js';
 import type { MovieRepository, RatingSource } from '../../src/movies/repository.js';
 import type { MovieRecord, MovieSummary } from '../../src/movies/schemas.js';
-import { averageRating, MovieNotFoundError, MovieService } from '../../src/movies/service.js';
+import type { MovieListCriteria } from '../../src/movies/service.js';
+import {
+  averageRating,
+  GenreNotFoundError,
+  MovieNotFoundError,
+  MovieService,
+} from '../../src/movies/service.js';
 
 const movie = (n: number): MovieSummary => ({
   imdbId: `tt${String(n)}`,
@@ -18,11 +24,10 @@ function fakeRepository(count: number) {
   const all = Array.from({ length: count }, (_, i) => movie(i + 1));
   const repository = {
     countMovies: vi.fn(() => count),
-    listMovies: vi.fn(({ limit, offset }: PageWindow) => all.slice(offset, offset + limit)),
-    listMoviesByReleaseDate: vi.fn(
-      (_filter: unknown, _sortOrder: unknown, { limit, offset }: PageWindow) =>
-        all.slice(offset, offset + limit),
+    listMovies: vi.fn((_filter: unknown, _sort: unknown, { limit, offset }: PageWindow) =>
+      all.slice(offset, offset + limit),
     ),
+    hasGenre: vi.fn(() => true),
     findMovieById: vi.fn((): MovieRecord | undefined => undefined),
   } satisfies MovieRepository;
   return repository;
@@ -36,11 +41,18 @@ function fakeRatings(stats: Record<number, { sum: number; count: number }> = {})
 }
 
 describe('MovieService.listMovies', () => {
+  const list = (repo: ReturnType<typeof fakeRepository>, criteria: Partial<MovieListCriteria>) =>
+    new MovieService(repo, fakeRatings()).listMovies({ page: 1, sortOrder: 'asc', ...criteria });
+
   it('requests the window for the page and builds pagination metadata', () => {
     const repo = fakeRepository(120);
-    const result = new MovieService(repo, fakeRatings()).listMovies(2);
+    const result = list(repo, { page: 2 });
 
-    expect(repo.listMovies).toHaveBeenCalledWith({ limit: 50, offset: 50 });
+    expect(repo.listMovies).toHaveBeenCalledWith(
+      { releaseYear: undefined, genre: undefined },
+      { by: 'movieId', order: 'asc' },
+      { limit: 50, offset: 50 },
+    );
     expect(result.data.map((m) => m.imdbId)).toEqual(
       Array.from({ length: 50 }, (_, i) => `tt${String(51 + i)}`),
     );
@@ -48,14 +60,12 @@ describe('MovieService.listMovies', () => {
   });
 
   it('returns the partial final page', () => {
-    const result = new MovieService(fakeRepository(120), fakeRatings()).listMovies(3);
-    expect(result.data).toHaveLength(20);
+    expect(list(fakeRepository(120), { page: 3 }).data).toHaveLength(20);
   });
 
   it('returns an empty page past the end without querying, preserving the page', () => {
     const repo = fakeRepository(120);
-    const result = new MovieService(repo, fakeRatings()).listMovies(4);
-    expect(result).toEqual({
+    expect(list(repo, { page: 4 })).toEqual({
       data: [],
       pagination: { page: 4, pageSize: 50, totalItems: 120, totalPages: 3 },
     });
@@ -64,51 +74,74 @@ describe('MovieService.listMovies', () => {
 
   it('never computes an unsafe SQL offset for huge pages', () => {
     const repo = fakeRepository(120);
-    const result = new MovieService(repo, fakeRatings()).listMovies(Number.MAX_SAFE_INTEGER);
+    const result = list(repo, { page: Number.MAX_SAFE_INTEGER, releaseYear: 1999 });
     expect(result.data).toEqual([]);
     expect(result.pagination.page).toBe(Number.MAX_SAFE_INTEGER);
     expect(repo.listMovies).not.toHaveBeenCalled();
   });
 
-  it('reports totalPages 0 for an empty collection', () => {
-    const result = new MovieService(fakeRepository(0), fakeRatings()).listMovies(1);
-    expect(result).toEqual({
+  it('reports totalPages 0 for an empty result', () => {
+    expect(list(fakeRepository(0), { releaseYear: 1850 })).toEqual({
       data: [],
       pagination: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 },
     });
   });
-});
 
-describe('MovieService.listMoviesByYear', () => {
-  it('counts and lists with the same year filter, passing sortOrder and the page window', () => {
-    const repo = fakeRepository(120);
-    const result = new MovieService(repo, fakeRatings()).listMoviesByYear(1999, 3, 'desc');
+  it.each([
+    [{}, 'movieId'],
+    [{ genre: { id: 28 } }, 'movieId'],
+    [{ releaseYear: 1999 }, 'releaseDate'],
+    [{ releaseYear: 1999, genre: { name: 'Action' } }, 'releaseDate'],
+  ] as const)('sorts %o by %s, in the requested direction', (filters, by) => {
+    const repo = fakeRepository(10);
+    list(repo, { ...filters, sortOrder: 'desc' });
+    const filter = { releaseYear: undefined, genre: undefined, ...filters };
+    expect(repo.countMovies).toHaveBeenCalledWith(filter);
+    expect(repo.listMovies).toHaveBeenCalledWith(
+      filter,
+      { by, order: 'desc' },
+      {
+        limit: 50,
+        offset: 0,
+      },
+    );
+  });
 
-    expect(repo.countMovies).toHaveBeenCalledWith({ releaseYear: 1999 });
-    expect(repo.listMoviesByReleaseDate).toHaveBeenCalledWith({ releaseYear: 1999 }, 'desc', {
-      limit: 50,
-      offset: 100,
-    });
+  it('checks the genre first and throws a 404 GenreNotFoundError for an unknown one', () => {
+    const repo = fakeRepository(10);
+    repo.hasGenre.mockReturnValue(false);
+    for (const [genre, message] of [
+      [{ id: 99 }, 'Genre 99 not found'],
+      [{ name: 'Space "Western"' }, 'Genre "Space \\"Western\\"" not found'],
+    ] as const) {
+      let error: unknown;
+      try {
+        list(repo, { genre, releaseYear: 1999 });
+      } catch (err) {
+        error = err;
+      }
+      expect(error).toBeInstanceOf(GenreNotFoundError);
+      expect(error).toMatchObject({ status: 404, code: 'GENRE_NOT_FOUND', message });
+    }
+    expect(repo.hasGenre).toHaveBeenCalledWith({ id: 99 });
+    expect(repo.countMovies).not.toHaveBeenCalled();
     expect(repo.listMovies).not.toHaveBeenCalled();
-    expect(result.data).toHaveLength(20);
-    expect(result.pagination).toEqual({ page: 3, pageSize: 50, totalItems: 120, totalPages: 3 });
   });
 
-  it('returns an empty page for a year with no movies, preserving the page', () => {
+  it('returns an empty 200 page for a known genre with no matches under the year', () => {
     const repo = fakeRepository(0);
-    const result = new MovieService(repo, fakeRatings()).listMoviesByYear(1850, 2, 'asc');
-    expect(result).toEqual({
-      data: [],
-      pagination: { page: 2, pageSize: 50, totalItems: 0, totalPages: 0 },
+    expect(list(repo, { genre: { id: 28 }, releaseYear: 1850, page: 2 }).pagination).toEqual({
+      page: 2,
+      pageSize: 50,
+      totalItems: 0,
+      totalPages: 0,
     });
-    expect(repo.listMoviesByReleaseDate).not.toHaveBeenCalled();
   });
 
-  it('never computes an unsafe SQL offset for huge pages', () => {
-    const repo = fakeRepository(120);
-    const service = new MovieService(repo, fakeRatings());
-    expect(service.listMoviesByYear(1999, Number.MAX_SAFE_INTEGER, 'asc').data).toEqual([]);
-    expect(repo.listMoviesByReleaseDate).not.toHaveBeenCalled();
+  it('does not check genres when there is no genre filter', () => {
+    const repo = fakeRepository(10);
+    list(repo, { releaseYear: 1999 });
+    expect(repo.hasGenre).not.toHaveBeenCalled();
   });
 });
 

@@ -155,7 +155,7 @@ describe('movies by year (supplied database)', () => {
     );
 
     it('accepts leading-zero pages and ignores unknown parameters', async () => {
-      expect(await getList(url('1999', 'page=02&genre=18&sort=title'))).toEqual(
+      expect(await getList(url('1999', 'page=02&color=red&sort=title'))).toEqual(
         await getList(url('1999', 'page=2')),
       );
     });
@@ -279,12 +279,16 @@ describe('movies by year: validation', () => {
 });
 
 describe('existing endpoints are unchanged', () => {
-  it('keeps the unfiltered listing in movieId order, ignoring sortOrder without year', async () => {
+  // Phase 4 changed this deliberately: sortOrder is now validated and applied
+  // (by movieId) on unfiltered listings too.
+  it('keeps the unfiltered listing in movieId order, with sortOrder=desc reversing it', async () => {
     const plain = await getList('/api/v1/movies');
     expect({ ...plain, data: plain.data.slice(0, 3) }).toEqual(V1_FIRST_PAGE_EXAMPLE);
-    for (const query of ['sortOrder=desc', 'sortOrder=bogus', 'sortOrder=a&sortOrder=b']) {
-      expect(await getList(`/api/v1/movies?${query}`)).toEqual(plain);
-    }
+    expect(await getList('/api/v1/movies?sortOrder=asc')).toEqual(plain);
+    const last = await getList('/api/v1/movies?page=909&sortOrder=desc');
+    expect(last.data.map((m) => m.imdbId).reverse()).toEqual(
+      plain.data.map((m) => m.imdbId).slice(0, 30),
+    );
   });
 
   it('still routes numeric ids to movie details', async () => {

@@ -1,10 +1,21 @@
 import type { PageWindow } from '../http/pagination.js';
-import type { MovieRecord, MovieSummary, SortOrder } from './schemas.js';
+import type { GenreRef, MovieRecord, MovieSummary, SortOrder } from './schemas.js';
 
-/** Conditions narrowing a movie listing. */
+/** Conditions narrowing a movie listing. Present conditions are combined with AND. */
 export interface MovieFilter {
   /** Calendar year (1–9999). Movies without a release date never match. */
-  readonly releaseYear: number;
+  readonly releaseYear?: number | undefined;
+  /** A genre the movie must have, by id or by case-insensitive exact name. */
+  readonly genre?: GenreRef | undefined;
+}
+
+/**
+ * Listing order. `releaseDate` sorts by date, then by `movieId` in the same
+ * direction for equal dates; `movieId` sorts by the stable primary identifier.
+ */
+export interface MovieSort {
+  readonly by: 'movieId' | 'releaseDate';
+  readonly order: SortOrder;
 }
 
 /**
@@ -13,19 +24,12 @@ export interface MovieFilter {
  * validated application records and order results deterministically.
  */
 export interface MovieRepository {
-  /** Number of movies, or of movies matching `filter`. */
-  countMovies(filter?: MovieFilter): number;
-  /** All movies ordered by their stable primary identifier, ascending. */
-  listMovies(window: PageWindow): MovieSummary[];
-  /**
-   * Movies matching `filter`, ordered by release date and then by the primary
-   * identifier, both in `sortOrder` direction, so equal dates are deterministic.
-   */
-  listMoviesByReleaseDate(
-    filter: MovieFilter,
-    sortOrder: SortOrder,
-    window: PageWindow,
-  ): MovieSummary[];
+  /** Number of movies matching `filter` (`{}` counts all). */
+  countMovies(filter: MovieFilter): number;
+  /** One window of the movies matching `filter`, in `sort` order. */
+  listMovies(filter: MovieFilter, sort: MovieSort, window: PageWindow): MovieSummary[];
+  /** Whether any movie in this version's data has the genre. */
+  hasGenre(genre: GenreRef): boolean;
   /** One movie by its numeric `movieId`, or `undefined` if there is none. */
   findMovieById(movieId: number): MovieRecord | undefined;
 }

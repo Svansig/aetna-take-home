@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { fourDigitYearParam } from '../src/http/params.js';
-import { MovieListQuerySchema, MoviesByYearQuerySchema } from '../src/movies/schemas.js';
+import {
+  MovieGenreParamsSchema,
+  MovieListQuerySchema,
+  MoviesByGenreQuerySchema,
+  MoviesByYearQuerySchema,
+} from '../src/movies/schemas.js';
 
 describe('fourDigitYearParam', () => {
   const year = fourDigitYearParam('year');
@@ -52,35 +57,87 @@ describe('fourDigitYearParam', () => {
   });
 });
 
-describe('MoviesByYearQuerySchema', () => {
+describe.each([
+  ['MoviesByYearQuerySchema', MoviesByYearQuerySchema],
+  ['MoviesByGenreQuerySchema', MoviesByGenreQuerySchema],
+  ['MovieListQuerySchema', MovieListQuerySchema],
+])('%s sortOrder', (_name, schema) => {
   it('defaults to page 1, ascending', () => {
-    expect(MoviesByYearQuerySchema.parse({})).toEqual({ page: 1, sortOrder: 'asc' });
+    expect(schema.parse({})).toEqual({ page: 1, sortOrder: 'asc' });
   });
 
   it('accepts asc and desc, ignoring unknown parameters', () => {
-    expect(MoviesByYearQuerySchema.parse({ page: '2', sortOrder: 'desc', x: '1' })).toEqual({
+    expect(schema.parse({ page: '2', sortOrder: 'desc', x: '1' })).toEqual({
       page: 2,
       sortOrder: 'desc',
     });
   });
 
-  it.each(['random', 'ascending', 'descending', 'ASC', '1', '', ['asc', 'desc']])(
+  it.each(['random', 'bogus', 'ascending', 'descending', 'ASC', 'Desc', '1', '', ['asc', 'desc']])(
     'rejects sortOrder %j',
     (sortOrder) => {
-      expect(MoviesByYearQuerySchema.safeParse({ sortOrder }).success).toBe(false);
+      expect(schema.safeParse({ sortOrder }).success).toBe(false);
     },
   );
 });
 
-describe('MovieListQuerySchema', () => {
-  it('leaves year undefined when omitted and does not read sortOrder', () => {
-    expect(MovieListQuerySchema.parse({ sortOrder: 'bogus' })).toEqual({ page: 1 });
+describe('MovieListQuerySchema filters', () => {
+  it('leaves both filters undefined when omitted', () => {
+    expect(MovieListQuerySchema.parse({})).toEqual({ page: 1, sortOrder: 'asc' });
   });
 
-  it('parses an optional year', () => {
-    expect(MovieListQuerySchema.parse({ year: '1999', page: '3' })).toEqual({
-      page: 3,
-      year: 1999,
-    });
+  it('parses year and genre together', () => {
+    expect(
+      MovieListQuerySchema.parse({ year: '1999', genre: 'Action', page: '3', sortOrder: 'desc' }),
+    ).toEqual({ page: 3, sortOrder: 'desc', year: 1999, genre: { name: 'Action' } });
+  });
+
+  it.each([
+    [{ year: '99', genre: 'Action' }, 'year'],
+    [{ year: '1999', genre: '0' }, 'genre'],
+    [{ year: '1999', genre: '' }, 'genre'],
+    [{ genre: ['Action', 'Drama'] }, 'genre'],
+  ])('rejects %o on %s', (query, path) => {
+    const result = MovieListQuerySchema.safeParse(query);
+    expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual([path]);
+  });
+});
+
+describe('genre parameter', () => {
+  const parse = (genre: unknown) => MovieGenreParamsSchema.safeParse({ genre });
+
+  it.each([
+    ['28', { id: 28 }],
+    ['028', { id: 28 }],
+    ['18', { id: 18 }],
+    [String(Number.MAX_SAFE_INTEGER), { id: Number.MAX_SAFE_INTEGER }],
+    ['Action', { name: 'Action' }],
+    ['action', { name: 'action' }],
+    ['Science Fiction', { name: 'Science Fiction' }],
+    ['TV Movie', { name: 'TV Movie' }],
+    // Not all digits, so these are names (and simply unknown ones, a 404 later).
+    ['-28', { name: '-28' }],
+    ['28.0', { name: '28.0' }],
+    ['1e3', { name: '1e3' }],
+    ['28a', { name: '28a' }],
+    [' Action', { name: ' Action' }],
+  ])('reads %j as %o', (input, expected) => {
+    expect(parse(input).data).toEqual({ genre: expected });
+  });
+
+  it.each([
+    ['0', 'genre id must be a positive integer no larger than 2^53-1'],
+    ['000', 'genre id must be a positive integer no larger than 2^53-1'],
+    [
+      String(Number.MAX_SAFE_INTEGER + 1),
+      'genre id must be a positive integer no larger than 2^53-1',
+    ],
+    ['99999999999999999999999', 'genre id must be a positive integer no larger than 2^53-1'],
+    ['', 'genre must not be empty'],
+    ['   ', 'genre must not be empty'],
+    [undefined, 'genre must be a genre id or name'],
+    [['Action', 'Drama'], 'genre must not be repeated'],
+  ])('rejects %j: %s', (input, message) => {
+    expect(parse(input).error?.issues.map((i) => i.message)).toEqual([message]);
   });
 });

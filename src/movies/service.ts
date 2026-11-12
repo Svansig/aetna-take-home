@@ -1,7 +1,7 @@
 import { HttpError } from '../http/errors.js';
 import { paginate } from '../http/pagination.js';
-import type { MovieRepository, RatingSource, RatingStats } from './repository.js';
-import type { MovieDetails, MovieListResponse, SortOrder } from './schemas.js';
+import type { MovieRepository, MovieSort, RatingSource, RatingStats } from './repository.js';
+import type { GenreRef, MovieDetails, MovieListResponse, SortOrder } from './schemas.js';
 
 /** A valid movie id that doesn't exist. The central handler turns it into a 404. */
 export class MovieNotFoundError extends HttpError {
@@ -9,6 +9,28 @@ export class MovieNotFoundError extends HttpError {
     super(404, 'MOVIE_NOT_FOUND', `Movie ${String(movieId)} not found`);
     this.name = 'MovieNotFoundError';
   }
+}
+
+/** A valid genre id or name that no movie in this version's data has. */
+export class GenreNotFoundError extends HttpError {
+  constructor(genre: GenreRef) {
+    super(
+      404,
+      'GENRE_NOT_FOUND',
+      'id' in genre
+        ? `Genre ${String(genre.id)} not found`
+        : `Genre ${JSON.stringify(genre.name)} not found`,
+    );
+    this.name = 'GenreNotFoundError';
+  }
+}
+
+/** What to list: a page, a direction and optional filters (combined with AND). */
+export interface MovieListCriteria {
+  readonly page: number;
+  readonly sortOrder: SortOrder;
+  readonly releaseYear?: number | undefined;
+  readonly genre?: GenreRef | undefined;
 }
 
 /**
@@ -30,25 +52,26 @@ export class MovieService {
   ) {}
 
   /**
-   * One page of all movies, by movie id. A page past the end returns an empty
-   * `data` array with accurate metadata and never reaches the data query.
+   * One page of movies, for every listing URL (all, by year, by genre, combined).
+   *
+   * - An unknown genre is a 404, even when other filters would match nothing anyway.
+   *   A known genre with no matches under the other filters is an empty page.
+   * - With a year, the order is chronological (ties broken by movie id in the same
+   *   direction); without one, it is by movie id.
+   * - A page past the end returns an empty `data` array with accurate metadata and
+   *   never reaches the data query.
    */
-  listMovies(page: number): MovieListResponse {
-    return paginate(page, this.repository.countMovies(), (window) =>
-      this.repository.listMovies(window),
-    );
-  }
-
-  /**
-   * One page of the movies released in `year`, in chronological `sortOrder`
-   * (ties broken by movie id in the same direction). Serves both
-   * `/movies/year/:year` and `/movies?year=`. A year with no movies is an empty
-   * page, not an error.
-   */
-  listMoviesByYear(year: number, page: number, sortOrder: SortOrder): MovieListResponse {
-    const filter = { releaseYear: year };
+  listMovies({ page, sortOrder, releaseYear, genre }: MovieListCriteria): MovieListResponse {
+    if (genre !== undefined && !this.repository.hasGenre(genre)) {
+      throw new GenreNotFoundError(genre);
+    }
+    const filter = { releaseYear, genre };
+    const sort: MovieSort = {
+      by: releaseYear === undefined ? 'movieId' : 'releaseDate',
+      order: sortOrder,
+    };
     return paginate(page, this.repository.countMovies(filter), (window) =>
-      this.repository.listMoviesByReleaseDate(filter, sortOrder, window),
+      this.repository.listMovies(filter, sort, window),
     );
   }
 

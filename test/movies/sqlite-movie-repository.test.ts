@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DataIntegrityError } from '../../src/db/sqlite.js';
+import type { MovieFilter, MovieSort } from '../../src/movies/repository.js';
 import { MovieSummarySchema } from '../../src/movies/schemas.js';
 import {
   SqliteMovieRepository,
@@ -8,17 +9,23 @@ import {
 } from '../../src/movies/sqlite-movie-repository.js';
 import { createFixtureMoviesDb, suppliedMoviesDb, type FixtureMovie } from '../helpers.js';
 
+/** No filter, in the default movieId order. */
+const ALL: MovieFilter = {};
+const BY_ID: MovieSort = { by: 'movieId', order: 'asc' };
+
 describe('SqliteMovieRepository (fixtures)', () => {
   it('orders by movieId ascending regardless of insertion order', () => {
     const db = createFixtureMoviesDb([{ movieId: 30 }, { movieId: 10 }, { movieId: 20 }]);
     const repo = new SqliteMovieRepository(db);
-    expect(repo.listMovies({ limit: 10, offset: 0 }).map((m) => m.imdbId)).toEqual([
+    expect(repo.listMovies(ALL, BY_ID, { limit: 10, offset: 0 }).map((m) => m.imdbId)).toEqual([
       'tt0000010',
       'tt0000020',
       'tt0000030',
     ]);
-    expect(repo.listMovies({ limit: 1, offset: 1 }).map((m) => m.imdbId)).toEqual(['tt0000020']);
-    expect(repo.countMovies()).toBe(3);
+    expect(repo.listMovies(ALL, BY_ID, { limit: 1, offset: 1 }).map((m) => m.imdbId)).toEqual([
+      'tt0000020',
+    ]);
+    expect(repo.countMovies(ALL)).toBe(3);
   });
 
   it('maps a row to exactly the five public fields', () => {
@@ -32,7 +39,7 @@ describe('SqliteMovieRepository (fixtures)', () => {
         budget: 4000000,
       },
     ]);
-    expect(new SqliteMovieRepository(db).listMovies({ limit: 1, offset: 0 })).toEqual([
+    expect(new SqliteMovieRepository(db).listMovies(ALL, BY_ID, { limit: 1, offset: 0 })).toEqual([
       {
         imdbId: 'tt1234567',
         title: 'A',
@@ -51,14 +58,16 @@ describe('SqliteMovieRepository (fixtures)', () => {
       { movieId: 1, releaseDate: '', budget: 0, genres: '[]' },
       { movieId: 2, releaseDate: null },
     ]);
-    const [a, b] = new SqliteMovieRepository(db).listMovies({ limit: 2, offset: 0 });
+    const [a, b] = new SqliteMovieRepository(db).listMovies(ALL, BY_ID, { limit: 2, offset: 0 });
     expect(a).toMatchObject({ releaseDate: null, budget: 0, genres: [] });
     expect(b).toMatchObject({ releaseDate: null });
   });
 
   it('keeps an empty imdbId as stored', () => {
     const db = createFixtureMoviesDb([{ movieId: 1, imdbId: '' }]);
-    expect(new SqliteMovieRepository(db).listMovies({ limit: 1, offset: 0 })[0]?.imdbId).toBe('');
+    expect(
+      new SqliteMovieRepository(db).listMovies(ALL, BY_ID, { limit: 1, offset: 0 })[0]?.imdbId,
+    ).toBe('');
   });
 
   it.each([
@@ -77,7 +86,7 @@ describe('SqliteMovieRepository (fixtures)', () => {
     const repo = new SqliteMovieRepository(db);
     let error: unknown;
     try {
-      repo.listMovies({ limit: 1, offset: 0 });
+      repo.listMovies(ALL, BY_ID, { limit: 1, offset: 0 });
     } catch (err) {
       error = err;
     }
@@ -91,7 +100,7 @@ describe('SqliteMovieRepository (fixtures)', () => {
     { limit: 1.5, offset: 0 },
   ])('rejects unsafe window %o before reaching SQLite', (window) => {
     const repo = new SqliteMovieRepository(createFixtureMoviesDb([]));
-    expect(() => repo.listMovies(window)).toThrow(RangeError);
+    expect(() => repo.listMovies(ALL, BY_ID, window)).toThrow(RangeError);
   });
 });
 
@@ -100,11 +109,11 @@ describe('SqliteMovieRepository (supplied movies.db)', () => {
   const repo = new SqliteMovieRepository(db);
 
   it('counts all 45,430 movies', () => {
-    expect(repo.countMovies()).toBe(45430);
+    expect(repo.countMovies(ALL)).toBe(45430);
   });
 
   it('maps every stored row without integrity errors, matching the raw values', () => {
-    const movies = repo.listMovies({ limit: 50_000, offset: 0 });
+    const movies = repo.listMovies(ALL, BY_ID, { limit: 50_000, offset: 0 });
     const raw = db
       .prepare('SELECT imdbId, title, genres, releaseDate, budget FROM movies ORDER BY movieId')
       .all() as {
@@ -251,7 +260,7 @@ describe('SqliteMovieRepository.findMovieById (supplied movies.db)', () => {
 
   it('uses the same summary fields as the listing', () => {
     const repo = new SqliteMovieRepository(suppliedMoviesDb());
-    const [listed] = repo.listMovies({ limit: 1, offset: 0 });
+    const [listed] = repo.listMovies(ALL, BY_ID, { limit: 1, offset: 0 });
     const record = repo.findMovieById(2)!;
     expect({
       imdbId: record.imdbId,
@@ -298,32 +307,46 @@ describe('SqliteMovieRepository year filter (fixtures)', () => {
     expect(repo.countMovies(filter)).toBe(4);
     expect(repo.countMovies({ releaseYear: 2000 })).toBe(1);
     expect(repo.countMovies({ releaseYear: 1850 })).toBe(0);
-    expect(repo.countMovies()).toBe(8);
+    expect(repo.countMovies(ALL)).toBe(8);
   });
 
   it('orders by release date, then movieId, in the requested direction', () => {
     const all = { limit: 50, offset: 0 };
-    expect(ids(repo.listMoviesByReleaseDate(filter, 'asc', all))).toEqual([4, 3, 5, 9]);
-    expect(ids(repo.listMoviesByReleaseDate(filter, 'desc', all))).toEqual([9, 5, 3, 4]);
+    expect(ids(repo.listMovies(filter, { by: 'releaseDate', order: 'asc' }, all))).toEqual([
+      4, 3, 5, 9,
+    ]);
+    expect(ids(repo.listMovies(filter, { by: 'releaseDate', order: 'desc' }, all))).toEqual([
+      9, 5, 3, 4,
+    ]);
   });
 
   it('applies LIMIT/OFFSET after ordering', () => {
-    expect(ids(repo.listMoviesByReleaseDate(filter, 'asc', { limit: 2, offset: 1 }))).toEqual([
-      3, 5,
-    ]);
-    expect(repo.listMoviesByReleaseDate(filter, 'desc', { limit: 2, offset: 4 })).toEqual([]);
+    expect(
+      ids(repo.listMovies(filter, { by: 'releaseDate', order: 'asc' }, { limit: 2, offset: 1 })),
+    ).toEqual([3, 5]);
+    expect(
+      repo.listMovies(filter, { by: 'releaseDate', order: 'desc' }, { limit: 2, offset: 4 }),
+    ).toEqual([]);
   });
 
   it('refuses unsafe years and windows before reaching SQLite', () => {
     expect(() => repo.countMovies({ releaseYear: 10000 })).toThrow(RangeError);
     expect(() =>
-      repo.listMoviesByReleaseDate({ releaseYear: 0 }, 'asc', { limit: 1, offset: 0 }),
+      repo.listMovies(
+        { releaseYear: 0 },
+        { by: 'releaseDate', order: 'asc' },
+        { limit: 1, offset: 0 },
+      ),
     ).toThrow(RangeError);
     expect(() =>
-      repo.listMoviesByReleaseDate(filter, 'asc', {
-        limit: 50,
-        offset: Number.MAX_SAFE_INTEGER + 1,
-      }),
+      repo.listMovies(
+        filter,
+        { by: 'releaseDate', order: 'asc' },
+        {
+          limit: 50,
+          offset: Number.MAX_SAFE_INTEGER + 1,
+        },
+      ),
     ).toThrow(RangeError);
   });
 
@@ -331,9 +354,9 @@ describe('SqliteMovieRepository year filter (fixtures)', () => {
     const broken = new SqliteMovieRepository(
       createFixtureMoviesDb([{ movieId: 8, releaseDate: '1999-02-02', genres: '[' }]),
     );
-    expect(() => broken.listMoviesByReleaseDate(filter, 'asc', { limit: 1, offset: 0 })).toThrow(
-      DataIntegrityError,
-    );
+    expect(() =>
+      broken.listMovies(filter, { by: 'releaseDate', order: 'asc' }, { limit: 1, offset: 0 }),
+    ).toThrow(DataIntegrityError);
   });
 });
 
@@ -352,5 +375,129 @@ describe('SqliteMovieRepository year filter (supplied movies.db)', () => {
     }
     // Every dated movie is in exactly one year; the 84 undated ones in none.
     expect(years.reduce((n, y) => n + y.total, 0)).toBe(45430 - 84);
+  });
+});
+
+describe('SqliteMovieRepository genre filter and sorting (fixtures)', () => {
+  const g = (...genres: [number, string][]) =>
+    JSON.stringify(genres.map(([id, name]) => ({ id, name })));
+  const repo = new SqliteMovieRepository(
+    createFixtureMoviesDb([
+      { movieId: 4, releaseDate: '1999-05-05', genres: g([28, 'Action']) },
+      { movieId: 1, releaseDate: '1999-05-05', genres: g([28, 'Action'], [18, 'Drama']) },
+      // Duplicate entry for the same genre: still one result.
+      { movieId: 3, releaseDate: '2000-01-01', genres: g([28, 'Action'], [28, 'Action']) },
+      { movieId: 2, releaseDate: '1999-02-02', genres: g([878, 'Science Fiction']) },
+      { movieId: 5, releaseDate: '1999-03-03', genres: g([10769, 'Foreign'], [18, 'Drama']) },
+      { movieId: 6, releaseDate: '', genres: '[]' },
+    ]),
+  );
+  const all = { limit: 50, offset: 0 };
+  const ids = (movies: { imdbId: string }[]) => movies.map((m) => Number(m.imdbId.slice(2)));
+  const list = (filter: MovieFilter, sort: MovieSort = BY_ID) =>
+    ids(repo.listMovies(filter, sort, all));
+
+  it('lists all movies by movieId in either direction', () => {
+    expect(list(ALL)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(list(ALL, { by: 'movieId', order: 'desc' })).toEqual([6, 5, 4, 3, 2, 1]);
+  });
+
+  it('matches a genre by id, once per movie even with duplicate entries', () => {
+    expect(list({ genre: { id: 28 } })).toEqual([1, 3, 4]);
+    expect(repo.countMovies({ genre: { id: 28 } })).toBe(3);
+    expect(list({ genre: { id: 28 } }, { by: 'movieId', order: 'desc' })).toEqual([4, 3, 1]);
+  });
+
+  it.each(['Action', 'action', 'ACTION', 'aCtIoN'])(
+    'matches the name %j case-insensitively',
+    (name) => {
+      expect(list({ genre: { name } })).toEqual([1, 3, 4]);
+    },
+  );
+
+  it('matches multiword names exactly', () => {
+    expect(list({ genre: { name: 'science fiction' } })).toEqual([2]);
+    expect(list({ genre: { name: 'Science' } })).toEqual([]);
+  });
+
+  it.each(['Act', 'Actio', 'Actions', ' Action', 'Action ', 'ction', '%', '_ction', 'Act%'])(
+    'does no partial or pattern matching: %j matches nothing',
+    (name) => {
+      expect(repo.countMovies({ genre: { name } })).toBe(0);
+      expect(repo.hasGenre({ name })).toBe(false);
+    },
+  );
+
+  it('does not match a genre id against names or a name against ids', () => {
+    expect(list({ genre: { name: '28' } })).toEqual([]);
+    expect(list({ genre: { id: 1 } })).toEqual([]);
+  });
+
+  it('combines year and genre with AND, chronologically with movieId tie-break', () => {
+    const filter = { releaseYear: 1999, genre: { name: 'action' } };
+    expect(repo.countMovies(filter)).toBe(2);
+    expect(list(filter, { by: 'releaseDate', order: 'asc' })).toEqual([1, 4]);
+    expect(list(filter, { by: 'releaseDate', order: 'desc' })).toEqual([4, 1]);
+    expect(
+      list({ releaseYear: 1999, genre: { id: 18 } }, { by: 'releaseDate', order: 'asc' }),
+    ).toEqual([5, 1]);
+    expect(repo.countMovies({ releaseYear: 2001, genre: { id: 28 } })).toBe(0);
+  });
+
+  it('reports genre existence from the data', () => {
+    expect(repo.hasGenre({ id: 878 })).toBe(true);
+    expect(repo.hasGenre({ name: 'FOREIGN' })).toBe(true);
+    expect(repo.hasGenre({ id: 99 })).toBe(false);
+    expect(repo.hasGenre({ name: 'Western' })).toBe(false);
+  });
+
+  it('refuses an unsafe genre id before reaching SQLite', () => {
+    expect(() => repo.countMovies({ genre: { id: Number.MAX_SAFE_INTEGER + 1 } })).toThrow(
+      RangeError,
+    );
+    expect(() => repo.hasGenre({ id: 1.5 })).toThrow(RangeError);
+  });
+});
+
+describe('SqliteMovieRepository genre filter (supplied movies.db)', () => {
+  const db = suppliedMoviesDb();
+  const repo = new SqliteMovieRepository(db);
+  // Independent oracle: genre membership from parsing every row's JSON in JavaScript.
+  const rows = db.prepare('SELECT movieId, genres, releaseDate FROM movies').all() as {
+    movieId: number;
+    genres: string;
+    releaseDate: string;
+  }[];
+  const genres = new Map<number, string>();
+  const parsed = rows.map((row) => {
+    const list = JSON.parse(row.genres) as { id: number; name: string }[];
+    for (const genre of list) genres.set(genre.id, genre.name);
+    return { ...row, ids: new Set(list.map((genre) => genre.id)) };
+  });
+
+  it('has the 20 known V1 genres', () => {
+    expect(genres.size).toBe(20);
+    expect(genres.get(28)).toBe('Action');
+  });
+
+  it('counts every genre by id, by name and by upper-case name like the oracle', () => {
+    for (const [id, name] of genres) {
+      const expected = parsed.filter((row) => row.ids.has(id)).length;
+      expect(repo.countMovies({ genre: { id } })).toBe(expected);
+      expect(repo.countMovies({ genre: { name } })).toBe(expected);
+      expect(repo.countMovies({ genre: { name: name.toUpperCase() } })).toBe(expected);
+      expect(repo.hasGenre({ id })).toBe(true);
+    }
+  });
+
+  it('counts year-and-genre combinations like the oracle', () => {
+    for (const year of [1977, 1999, 2014]) {
+      for (const id of [18, 28, 878, 10770]) {
+        const expected = parsed.filter(
+          (row) => row.ids.has(id) && row.releaseDate.startsWith(`${String(year)}-`),
+        ).length;
+        expect(repo.countMovies({ releaseYear: year, genre: { id } })).toBe(expected);
+      }
+    }
   });
 });
