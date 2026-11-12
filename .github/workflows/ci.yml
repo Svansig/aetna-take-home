@@ -1,0 +1,63 @@
+# Continuous integration: validates every pull request into `main` and every push
+# to `main`. This workflow is unprivileged (read-only token, no secrets) and never
+# publishes or deploys anything; publication is handled by publish.yml, which runs
+# only after this workflow succeeds for a push to `main`.
+#
+# Third-party actions are pinned to reviewed commit SHAs (version in the comment).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # PRs: one run per PR; a new revision cancels the superseded run.
+  # Pushes to main: one group per commit and never cancelled, so a run whose
+  # success triggers a release is never interrupted by a later push.
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}', github.sha) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Tests open the committed db/*.db fixtures read-only. No secrets are used.
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js (version from .nvmrc)
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          # Caches the npm download cache (~/.npm) keyed on the lockfile hash.
+          # node_modules is never cached; `npm ci` rebuilds it from scratch.
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (lockfile)
+        # Same flags as the Dockerfile: no dependency needs an install script.
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

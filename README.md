@@ -26,6 +26,7 @@ dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.m
 | `GET /health`                                                                            | ✅ Implemented                               |
 | OpenAPI 3.1 at `/openapi.json`, Swagger UI at `/docs`                                    | ✅ Implemented                               |
 | Docker image and Compose deployment                                                      | ✅ Implemented                               |
+| GitHub Actions CI (format, lint, typecheck, test, build)                                 | ✅ Implemented                               |
 | **US1 List All Movies:** `GET /api/v1/movies`                                            | ✅ Implemented (V1 only)                     |
 | **US2 Movie Details:** `GET /api/v1/movies/{movieId}`                                    | ✅ Implemented (V1 only, naive ratings join) |
 | **US3 Movies By Year:** `GET /api/v1/movies/year/{year}`, `GET /api/v1/movies?year=`     | ✅ Implemented (V1 only)                     |
@@ -445,6 +446,48 @@ Infrastructure coverage:
 - Error handling for 400 / 404 / 500 (no internal detail leaked)
 - Request logging
 - Rejection of invalid configuration
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request
+targeting `main` and every push to `main`, on a GitHub-hosted `ubuntu-24.04` runner.
+
+| Step             | Command                                             |
+| ---------------- | --------------------------------------------------- |
+| Node.js          | Version from `.nvmrc` (`actions/setup-node`)        |
+| Install          | `npm ci --ignore-scripts` (committed lockfile)      |
+| Formatting       | `npm run format:check`                              |
+| Lint             | `npm run lint`                                      |
+| Types            | `npm run typecheck`                                 |
+| Tests            | `npm test` (Vitest + Supertest, `db/*.db` fixtures) |
+| Production build | `npm run build`                                     |
+
+- Every step must pass; the first failure fails the run. Protect `main` with the
+  **CI / Validate** status check (repository settings → branch rules) so a failing
+  PR can't merge.
+- The token is read-only (`permissions: contents: read`), checkout doesn't persist
+  credentials, and no secrets or homelab credentials are used. Tests run against
+  the committed SQLite fixtures, opened read-only.
+- npm's download cache (`~/.npm`) is cached, keyed on `package-lock.json`.
+  `node_modules` is never cached; `npm ci` always rebuilds it.
+- A new commit on a PR cancels the PR's previous run. Pushes to `main` each get
+  their own concurrency group and are never cancelled, because a successful
+  `main` run is what triggers a release.
+- CI never publishes or deploys. Third-party actions are pinned to commit SHAs:
+
+  | Action               | Version | Commit                                     |
+  | -------------------- | ------- | ------------------------------------------ |
+  | `actions/checkout`   | v7.0.1  | `3d3c42e5aac5ba805825da76410c181273ba90b1` |
+  | `actions/setup-node` | v7.1.0  | `949feb2413d6458794dcd2491c4babbbce0c15c1` |
+
+  To upgrade, review the new release, then replace both the SHA and the version
+  comment.
+
+To reproduce CI locally:
+
+```sh
+npm ci --ignore-scripts && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
+```
 
 ## Docker
 
