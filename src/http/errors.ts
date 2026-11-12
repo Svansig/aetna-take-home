@@ -1,7 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { z } from 'zod';
 
-/** Public JSON error body shared by every endpoint and both API versions. */
+/** Public JSON error body shared by every endpoint. */
 export const ErrorResponseSchema = z
   .object({
     error: z.object({

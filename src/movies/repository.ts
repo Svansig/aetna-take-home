@@ -19,8 +19,8 @@ export interface MovieSort {
 }
 
 /**
- * Movie data access used by `MovieService`. Each API version supplies its own
- * implementation (V1: original SQLite database). Implementations return
+ * Movie data access used by `MovieService` (implemented by
+ * `SqliteMovieRepository`). Implementations return
  * validated application records (budgets as whole-dollar integers; the service
  * formats them) and order results deterministically.
  */
@@ -29,7 +29,7 @@ export interface MovieRepository {
   countMovies(filter: MovieFilter): number;
   /** One window of the movies matching `filter`, in `sort` order. */
   listMovies(filter: MovieFilter, sort: MovieSort, window: PageWindow): MovieSummaryRecord[];
-  /** Whether any movie in this version's data has the genre. */
+  /** Whether any movie has the genre. */
   hasGenre(genre: GenreRef): boolean;
   /** One movie by its numeric `movieId`, or `undefined` if there is none. */
   findMovieById(movieId: number): MovieRecord | undefined;
@@ -44,8 +44,7 @@ export interface RatingStats {
 /**
  * Where a movie's ratings come from, given the movies database's `movieId`.
  * This is separate from `MovieRepository` because ratings live in another
- * database, and the way the two are associated differs by version. V1 matches
- * ids naively; V2 is planned to use a corrected id mapping.
+ * database that uses a different movie id system (see `NaiveSqliteRatingSource`).
  */
 export interface RatingSource {
   statsForMovie(movieId: number): RatingStats;

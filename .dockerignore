@@ -4,7 +4,6 @@ dist
 coverage
 kaggle
 db
-data
 test
 .env
 .env.*

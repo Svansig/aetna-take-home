@@ -12,7 +12,7 @@ import {
   type SortOrder,
 } from './schemas.js';
 
-/** Raw column types as stored in the V1 `movies` table (listing columns). */
+/** Raw column types as stored in the `movies` table (listing columns). */
 const MovieRowSchema = z.object({
   movieId: z.int(),
   imdbId: z.string(),
@@ -44,7 +44,7 @@ const SUMMARY_COLUMNS = 'movieId, imdbId, title, genres, releaseDate, budget';
  *   range `YYYY-01-01`..`YYYY-12-31` selects exactly that year with no date
  *   function, and year 9999 needs no year 10000. Missing dates never match.
  * - Genre: `genres` is a JSON array of `{ id, name }`. `json_each` matches the
- *   `id` field, or the `name` field with ASCII case-insensitive `NOCASE` (all V1
+ *   `id` field, or the `name` field with ASCII case-insensitive `NOCASE` (all
  *   genre names are ASCII). `EXISTS` returns each movie at most once, even if its
  *   array lists a genre twice, and needs no join.
  */
@@ -63,7 +63,7 @@ const ORDER_BY = {
 } as const satisfies Record<MovieSort['by'], Record<SortOrder, string>>;
 
 /**
- * V1 movie repository over the original supplied `movies.db`.
+ * Movie repository over the original supplied `movies.db`.
  *
  * Statements are prepared once per connection. `movieId` is the table's INTEGER
  * PRIMARY KEY (the rowid), so ordering by it, LIMIT/OFFSET and lookup by id use
@@ -199,7 +199,7 @@ function summaryFields(row: MovieRow) {
 }
 
 /**
- * Agreed V1 fallback: 483 source rows hold production-company text that isn't
+ * Agreed fallback: 483 source rows hold production-company text that isn't
  * valid JSON (mostly unescaped quotes in company names). Those return `[]` rather
  * than failing the request, and no repair is attempted. JSON that parses but has
  * the wrong shape is still rejected by the schema as an integrity error.

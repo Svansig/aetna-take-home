@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config.js';
-import { V1_DETAILS_EXAMPLES } from '../../src/movies/routes.js';
+import { DETAILS_EXAMPLES } from '../../src/movies/routes.js';
 import { MovieDetailsSchema, type MovieDetails } from '../../src/movies/schemas.js';
 import {
   createFixtureMoviesDb,
   createFixtureRatingsDb,
   createTestApp,
-  createTestVersions,
+  createTestApiRouter,
   suppliedMoviesDb,
   suppliedRatingsDb,
 } from '../helpers.js';
@@ -39,7 +39,7 @@ async function getDetails(movieId: number | string, testApp = app): Promise<Movi
   return MovieDetailsSchema.parse(res.body);
 }
 
-/** Independent oracle: the naive V1 average straight from ratings.db. */
+/** Independent oracle: the naive average straight from ratings.db. */
 function oracleAverage(movieId: number): number | null {
   const row = suppliedRatingsDb()
     .prepare('SELECT COUNT(*) AS n, ROUND(AVG(rating), 6) AS avg FROM ratings WHERE movieId = ?')
@@ -57,7 +57,7 @@ const firstId = (where: string): number =>
 describe('GET /api/v1/movies/:movieId (supplied databases)', () => {
   const sha256 = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
   const config = loadConfig({});
-  const paths = [config.V1_MOVIES_DB_PATH, config.V1_RATINGS_DB_PATH];
+  const paths = [config.MOVIES_DB_PATH, config.RATINGS_DB_PATH];
   let hashesBefore: string[];
   beforeAll(() => {
     hashesBefore = paths.map(sha256);
@@ -67,17 +67,17 @@ describe('GET /api/v1/movies/:movieId (supplied databases)', () => {
     expect(paths.map(sha256)).toEqual(hashesBefore);
   });
 
-  it('returns Star Wars (movieId 11) with the naive V1 rating of 3.69', async () => {
+  it('returns Star Wars (movieId 11) with the naive rating of 3.69', async () => {
     const movie = await getDetails(11);
-    expect(movie).toEqual(V1_DETAILS_EXAMPLES[11]);
+    expect(movie).toEqual(DETAILS_EXAMPLES[11]);
     expect(movie.averageRating).toBe(3.69);
-    // Its correctly mapped MovieLens id (260) would give 4.22. V1 must not use it.
+    // Its correctly mapped MovieLens id (260) would give 4.22. The API must not use it.
     expect(oracleAverage(260)).toBe(4.22);
   });
 
   it('returns Capote (movieId 398): no matching ratings and malformed company JSON', async () => {
     const movie = await getDetails(398);
-    expect(movie).toEqual(V1_DETAILS_EXAMPLES[398]);
+    expect(movie).toEqual(DETAILS_EXAMPLES[398]);
     expect(movie.averageRating).toBeNull();
     expect(movie.productionCompanies).toEqual([]);
   });
@@ -137,7 +137,7 @@ describe('GET /api/v1/movies/:movieId (supplied databases)', () => {
   });
 
   it('accepts leading zeros like the page parameter', async () => {
-    expect(await getDetails('011')).toEqual(V1_DETAILS_EXAMPLES[11]);
+    expect(await getDetails('011')).toEqual(DETAILS_EXAMPLES[11]);
   });
 
   it('returns 404 MOVIE_NOT_FOUND for a valid id with no movie', async () => {
@@ -199,7 +199,7 @@ describe('GET /api/v1/movies/:movieId (fixtures)', () => {
     [8, 1.5],
   ]);
   const { app: fixtureApp, logs } = createTestApp({
-    versions: createTestVersions(moviesDb, ratingsDb),
+    apiRouter: createTestApiRouter(moviesDb, ratingsDb),
   });
 
   it('averages the matching ratings and rounds to 2 decimals', async () => {
@@ -213,7 +213,7 @@ describe('GET /api/v1/movies/:movieId (fixtures)', () => {
 
   it('returns averageRating null for a movie with no ratings', async () => {
     const empty = createTestApp({
-      versions: createTestVersions(createFixtureMoviesDb([{ movieId: 3 }]), ratingsDb),
+      apiRouter: createTestApiRouter(createFixtureMoviesDb([{ movieId: 3 }]), ratingsDb),
     }).app;
     expect((await getDetails(3, empty)).averageRating).toBeNull();
   });
@@ -230,7 +230,7 @@ describe('GET /api/v1/movies/:movieId (fixtures)', () => {
   it('returns a generic 500 when the ratings database is unavailable', async () => {
     const closedRatings = createFixtureRatingsDb([]);
     const broken = createTestApp({
-      versions: createTestVersions(createFixtureMoviesDb([{ movieId: 1 }]), closedRatings),
+      apiRouter: createTestApiRouter(createFixtureMoviesDb([{ movieId: 1 }]), closedRatings),
     }).app;
     closedRatings.close();
     const res = await request(broken).get('/api/v1/movies/1');

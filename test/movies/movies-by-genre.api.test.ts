@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { V1_GENRE_EXAMPLES } from '../../src/movies/routes.js';
+import { GENRE_EXAMPLES } from '../../src/movies/routes.js';
 import {
   MovieListResponseSchema,
   type MovieListResponse,
@@ -9,7 +9,7 @@ import {
 import {
   createFixtureMoviesDb,
   createTestApp,
-  createTestVersions,
+  createTestApiRouter,
   suppliedMoviesDb,
   usd,
 } from '../helpers.js';
@@ -172,9 +172,9 @@ describe('movies by genre (supplied database)', () => {
 
   it('matches the documented examples', async () => {
     const action = await getList(STYLES.path('Action'));
-    expect({ ...action, data: action.data.slice(0, 3) }).toEqual(V1_GENRE_EXAMPLES.action);
+    expect({ ...action, data: action.data.slice(0, 3) }).toEqual(GENRE_EXAMPLES.action);
     const combined = await getList('/api/v1/movies?year=1999&genre=Action');
-    expect({ ...combined, data: combined.data.slice(0, 3) }).toEqual(V1_GENRE_EXAMPLES.action1999);
+    expect({ ...combined, data: combined.data.slice(0, 3) }).toEqual(GENRE_EXAMPLES.action1999);
   });
 
   it('ignores unknown parameters and a year on the dedicated genre route', async () => {
@@ -335,7 +335,7 @@ describe('movies by genre (fixtures)', () => {
   const g = (...genres: [number, string][]) =>
     JSON.stringify(genres.map(([id, name]) => ({ id, name })));
   const fixtureApp = createTestApp({
-    versions: createTestVersions(
+    apiRouter: createTestApiRouter(
       createFixtureMoviesDb([
         // Duplicate genre entry: listed once.
         { movieId: 3, releaseDate: '2001-01-01', genres: g([28, 'Action'], [28, 'Action']) },
@@ -372,7 +372,7 @@ describe('movies by genre (fixtures)', () => {
 
   it('returns a generic 500 when stored genre JSON breaks the genre query', async () => {
     const broken = createTestApp({
-      versions: createTestVersions(
+      apiRouter: createTestApiRouter(
         createFixtureMoviesDb([{ movieId: 1, genres: '[{"id": 28, "name": ' }]),
       ),
     }).app;

@@ -18,7 +18,7 @@ export class MovieNotFoundError extends HttpError {
   }
 }
 
-/** A valid genre id or name that no movie in this version's data has. */
+/** A valid genre id or name that no movie has. */
 export class GenreNotFoundError extends HttpError {
   constructor(genre: GenreRef) {
     super(
@@ -74,7 +74,7 @@ function toPublicSummary(record: MovieSummaryRecord): MovieSummary {
   return { ...record, budget: formatUsd(record.budget) };
 }
 
-/** Movie use cases, shared by every API version and independent of Express. */
+/** Movie use cases, independent of Express. */
 export class MovieService {
   constructor(
     private readonly repository: MovieRepository,
@@ -105,7 +105,7 @@ export class MovieService {
     );
   }
 
-  /** Details for one movie, with its average rating from the version's rating source. */
+  /** Details for one movie, with its average rating from the rating source. */
   getMovieDetails(movieId: number): MovieDetails {
     const movie = this.repository.findMovieById(movieId);
     if (movie === undefined) throw new MovieNotFoundError(movieId);

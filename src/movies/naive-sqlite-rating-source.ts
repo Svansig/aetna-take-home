@@ -6,15 +6,15 @@ import type { RatingSource, RatingStats } from './repository.js';
 const StatsRowSchema = z.object({ count: z.int().min(0), sum: z.number() });
 
 /**
- * V1 rating source over the original supplied `ratings.db`.
+ * Rating source over the original supplied `ratings.db`.
  *
  * **Deliberately naive.** It matches `movies.movieId` (a TMDB id) to
  * `ratings.movieId` (a MovieLens id) as if they were the same number. They are
  * different id systems, so for many movies the ratings belong to an unrelated
  * film. For example, movieId 11 (Star Wars) picks up MovieLens movie 11's ratings
- * (average 3.69), while Star Wars' real MovieLens id is 260 (average 4.22). V1
- * keeps this behaviour on purpose to reflect the supplied data. A corrected
- * mapping is planned for V2.
+ * (average 3.69), while Star Wars' real MovieLens id is 260 (average 4.22). The
+ * API keeps this behaviour on purpose to reflect the supplied data; a correct
+ * association would need an authoritative TMDB-to-MovieLens id mapping.
  *
  * `ratings.movieId` has no index and the schema must not change, so each call
  * scans the 100,004-row table (about 2 ms).

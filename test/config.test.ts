@@ -10,10 +10,20 @@ describe('loadConfig', () => {
       HOST: '127.0.0.1',
       PORT: 3000,
       LOG_LEVEL: 'info',
-      V1_MOVIES_DB_PATH: path.join(PROJECT_ROOT, 'db/movies.db'),
-      V1_RATINGS_DB_PATH: path.join(PROJECT_ROOT, 'db/ratings.db'),
-      V2_DB_PATH: path.join(PROJECT_ROOT, 'data/v2/movies.db'),
+      MOVIES_DB_PATH: path.join(PROJECT_ROOT, 'db/movies.db'),
+      RATINGS_DB_PATH: path.join(PROJECT_ROOT, 'db/ratings.db'),
     });
+  });
+
+  it('defines only the single-version settings', () => {
+    expect(Object.keys(loadConfig({})).sort()).toEqual([
+      'HOST',
+      'LOG_LEVEL',
+      'MOVIES_DB_PATH',
+      'NODE_ENV',
+      'PORT',
+      'RATINGS_DB_PATH',
+    ]);
   });
 
   it('parses explicit values', () => {
@@ -22,20 +32,22 @@ describe('loadConfig', () => {
       HOST: '0.0.0.0',
       PORT: '8080',
       LOG_LEVEL: 'warn',
-      V1_MOVIES_DB_PATH: '/data/movies.db',
+      MOVIES_DB_PATH: '/data/movies.db',
+      RATINGS_DB_PATH: '/data/ratings.db',
     });
     expect(config).toMatchObject({
       NODE_ENV: 'production',
       HOST: '0.0.0.0',
       PORT: 8080,
       LOG_LEVEL: 'warn',
-      V1_MOVIES_DB_PATH: '/data/movies.db',
+      MOVIES_DB_PATH: '/data/movies.db',
+      RATINGS_DB_PATH: '/data/ratings.db',
     });
   });
 
   it('resolves relative database paths against the project root, not the CWD', () => {
-    const config = loadConfig({ V2_DB_PATH: './somewhere/v2.db' });
-    expect(config.V2_DB_PATH).toBe(path.join(PROJECT_ROOT, 'somewhere/v2.db'));
+    const config = loadConfig({ MOVIES_DB_PATH: './somewhere/movies.db' });
+    expect(config.MOVIES_DB_PATH).toBe(path.join(PROJECT_ROOT, 'somewhere/movies.db'));
   });
 
   it('treats empty strings as unset', () => {
@@ -45,8 +57,15 @@ describe('loadConfig', () => {
     });
   });
 
-  it('does not require the V2 database file to exist', () => {
-    expect(() => loadConfig({ V2_DB_PATH: '/definitely/missing.db' })).not.toThrow();
+  it('ignores removed and unknown variables', () => {
+    const config = loadConfig({
+      V1_MOVIES_DB_PATH: '/old/movies.db',
+      V2_DB_PATH: '   ',
+      SOMETHING_ELSE: 'x',
+    });
+    expect(config).not.toHaveProperty('V2_DB_PATH');
+    expect(config).not.toHaveProperty('V1_MOVIES_DB_PATH');
+    expect(config.MOVIES_DB_PATH).toBe(path.join(PROJECT_ROOT, 'db/movies.db'));
   });
 
   it.each([
@@ -57,7 +76,8 @@ describe('loadConfig', () => {
     ['NODE_ENV', 'staging'],
     ['LOG_LEVEL', 'verbose'],
     ['HOST', '   '],
-    ['V1_MOVIES_DB_PATH', '   '],
+    ['MOVIES_DB_PATH', '   '],
+    ['RATINGS_DB_PATH', '   '],
   ])('rejects invalid %s=%j', (key, value) => {
     expect(() => loadConfig({ [key]: value })).toThrow(ConfigError);
   });
