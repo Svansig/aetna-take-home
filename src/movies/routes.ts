@@ -62,6 +62,7 @@ export function createMoviesRouter(service: MovieService): Router {
 export const V1_FIRST_PAGE_EXAMPLE: MovieListResponse = {
   data: [
     {
+      movieId: 2,
       imdbId: 'tt0094675',
       title: 'Ariel',
       genres: [
@@ -69,9 +70,10 @@ export const V1_FIRST_PAGE_EXAMPLE: MovieListResponse = {
         { id: 80, name: 'Crime' },
       ],
       releaseDate: '1988-10-21',
-      budget: 0,
+      budget: '$0',
     },
     {
+      movieId: 3,
       imdbId: 'tt0092149',
       title: 'Shadows in Paradise',
       genres: [
@@ -79,9 +81,10 @@ export const V1_FIRST_PAGE_EXAMPLE: MovieListResponse = {
         { id: 35, name: 'Comedy' },
       ],
       releaseDate: '1986-10-16',
-      budget: 0,
+      budget: '$0',
     },
     {
+      movieId: 5,
       imdbId: 'tt0113101',
       title: 'Four Rooms',
       genres: [
@@ -89,7 +92,7 @@ export const V1_FIRST_PAGE_EXAMPLE: MovieListResponse = {
         { id: 35, name: 'Comedy' },
       ],
       releaseDate: '1995-12-09',
-      budget: 4000000,
+      budget: '$4,000,000',
     },
   ],
   pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 45430, totalPages: 909 },
@@ -104,6 +107,7 @@ export const V1_YEAR_1999_EXAMPLES = {
   asc: {
     data: [
       {
+        movieId: 3144,
         imdbId: 'tt0183717',
         title: "Rock 'n' Roll Frankenstein",
         genres: [
@@ -111,16 +115,18 @@ export const V1_YEAR_1999_EXAMPLES = {
           { id: 27, name: 'Horror' },
         ],
         releaseDate: '1999-01-01',
-        budget: 0,
+        budget: '$0',
       },
       {
+        movieId: 15752,
         imdbId: 'tt0211219',
         title: 'Barenaked in America',
         genres: [{ id: 99, name: 'Documentary' }],
         releaseDate: '1999-01-01',
-        budget: 0,
+        budget: '$0',
       },
       {
+        movieId: 18143,
         imdbId: 'tt0373960',
         title: 'She and Her Cat: Their Standing Points',
         genres: [
@@ -128,7 +134,7 @@ export const V1_YEAR_1999_EXAMPLES = {
           { id: 10749, name: 'Romance' },
         ],
         releaseDate: '1999-01-01',
-        budget: 0,
+        budget: '$0',
       },
     ],
     pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 723, totalPages: 15 },
@@ -136,6 +142,7 @@ export const V1_YEAR_1999_EXAMPLES = {
   desc: {
     data: [
       {
+        movieId: 105980,
         imdbId: 'tt0129023',
         title: 'Dark Harbor',
         genres: [
@@ -143,9 +150,10 @@ export const V1_YEAR_1999_EXAMPLES = {
           { id: 18, name: 'Drama' },
         ],
         releaseDate: '1999-12-31',
-        budget: 0,
+        budget: '$0',
       },
       {
+        movieId: 56828,
         imdbId: 'tt0293092',
         title: "Dexter's Laboratory: Ego Trip",
         genres: [
@@ -155,14 +163,15 @@ export const V1_YEAR_1999_EXAMPLES = {
           { id: 878, name: 'Science Fiction' },
         ],
         releaseDate: '1999-12-31',
-        budget: 0,
+        budget: '$0',
       },
       {
+        movieId: 41245,
         imdbId: 'tt0247613',
         title: 'Peppermint Candy',
         genres: [{ id: 18, name: 'Drama' }],
         releaseDate: '1999-12-31',
-        budget: 0,
+        budget: '$0',
       },
     ],
     pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 723, totalPages: 15 },
@@ -186,6 +195,7 @@ export const V1_GENRE_EXAMPLES = {
   action: {
     data: [
       {
+        movieId: 6,
         imdbId: 'tt0107286',
         title: 'Judgment Night',
         genres: [
@@ -194,9 +204,10 @@ export const V1_GENRE_EXAMPLES = {
           { id: 80, name: 'Crime' },
         ],
         releaseDate: '1993-10-15',
-        budget: 0,
+        budget: '$0',
       },
       {
+        movieId: 11,
         imdbId: 'tt0076759',
         title: 'Star Wars',
         genres: [
@@ -205,9 +216,10 @@ export const V1_GENRE_EXAMPLES = {
           { id: 878, name: 'Science Fiction' },
         ],
         releaseDate: '1977-05-25',
-        budget: 11000000,
+        budget: '$11,000,000',
       },
       {
+        movieId: 18,
         imdbId: 'tt0119116',
         title: 'The Fifth Element',
         genres: [
@@ -218,7 +230,7 @@ export const V1_GENRE_EXAMPLES = {
           { id: 878, name: 'Science Fiction' },
         ],
         releaseDate: '1997-05-07',
-        budget: 90000000,
+        budget: '$90,000,000',
       },
     ],
     pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 6590, totalPages: 132 },
@@ -226,6 +238,7 @@ export const V1_GENRE_EXAMPLES = {
   action1999: {
     data: [
       {
+        movieId: 25660,
         imdbId: 'tt0223530',
         title: 'Nowhere to Hide',
         genres: [
@@ -234,9 +247,10 @@ export const V1_GENRE_EXAMPLES = {
           { id: 80, name: 'Crime' },
         ],
         releaseDate: '1999-01-01',
-        budget: 0,
+        budget: '$0',
       },
       {
+        movieId: 30817,
         imdbId: 'tt0181838',
         title: 'Stealth Fighter',
         genres: [
@@ -244,9 +258,10 @@ export const V1_GENRE_EXAMPLES = {
           { id: 53, name: 'Thriller' },
         ],
         releaseDate: '1999-01-01',
-        budget: 0,
+        budget: '$0',
       },
       {
+        movieId: 31501,
         imdbId: 'tt0203082',
         title: 'Samurai X: Trust & Betrayal',
         genres: [
@@ -257,7 +272,7 @@ export const V1_GENRE_EXAMPLES = {
           { id: 10749, name: 'Romance' },
         ],
         releaseDate: '1999-01-01',
-        budget: 0,
+        budget: '$0',
       },
     ],
     pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 100, totalPages: 2 },
@@ -272,6 +287,7 @@ export const V1_GENRE_EXAMPLES = {
  */
 export const V1_DETAILS_EXAMPLES = {
   11: {
+    movieId: 11,
     imdbId: 'tt0076759',
     title: 'Star Wars',
     description:
@@ -280,7 +296,7 @@ export const V1_DETAILS_EXAMPLES = {
       'Solo team together with the loveable robot duo R2-D2 and C-3PO to rescue the beautiful ' +
       'princess and restore peace and justice in the Empire.',
     releaseDate: '1977-05-25',
-    budget: 11000000,
+    budget: '$11,000,000',
     runtime: 121,
     averageRating: 3.69,
     genres: [
@@ -295,12 +311,13 @@ export const V1_DETAILS_EXAMPLES = {
     ],
   },
   398: {
+    movieId: 398,
     imdbId: 'tt0379725',
     title: 'Capote',
     description:
       "A biopic of the writer, Truman Capote and his assignment for The New Yorker to write the non-fiction book, 'In Cold Blood'.",
     releaseDate: '2005-09-30',
-    budget: 7000000,
+    budget: '$7,000,000',
     runtime: 114,
     averageRating: null,
     genres: [
@@ -384,7 +401,8 @@ export function registerMoviesDocs(
     '  `200` with `data: []`, `totalItems: 0` and `totalPages: 0`.',
     '* `page` is 1-indexed and defaults to 1. The page size is fixed. A page past the',
     '  end returns `200` with `data: []` and accurate `pagination`.',
-    '* `budget` is in whole US dollars. `releaseDate` is a `YYYY-MM-DD` date or `null`.',
+    '* `movieId` identifies the movie for `GET /movies/{movieId}`. `budget` is a US dollar',
+    '  string such as `$4,000,000`. `releaseDate` is a `YYYY-MM-DD` date or `null`.',
     `* Unknown query parameters are ignored. A repeated ${repeatable} is a \`400\`.`,
   ];
   const badRequest = (examples: Record<string, [string, string]>) => ({
@@ -536,7 +554,7 @@ export function registerMoviesDocs(
       'Returns one movie, looked up by its numeric `movieId` (the id used by the movies',
       'database, not an IMDb id).',
       '',
-      '* `budget` is in whole US dollars. `0` is returned as stored and often means the',
+      '* `budget` is a US dollar string such as `$11,000,000`. `$0` usually means the',
       '  budget was not recorded in the original dataset.',
       '* `runtime` is in minutes, or `null` when the source value is empty.',
       '* `averageRating` is the mean of matching ratings on a 0.5–5.0 scale, rounded to 2',

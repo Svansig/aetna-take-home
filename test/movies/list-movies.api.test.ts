@@ -1,7 +1,11 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { V1_FIRST_PAGE_EXAMPLE } from '../../src/movies/routes.js';
-import { MovieListResponseSchema, type MovieListResponse } from '../../src/movies/schemas.js';
+import {
+  MovieListResponseSchema,
+  USD_PATTERN,
+  type MovieListResponse,
+} from '../../src/movies/schemas.js';
 import {
   createFixtureMoviesDb,
   createTestApp,
@@ -105,19 +109,41 @@ describe('GET /api/v1/movies: invalid page (400)', () => {
 });
 
 describe('GET /api/v1/movies: response shape (supplied database)', () => {
-  it('returns exactly the five fields per movie, with structured genres', async () => {
+  it('returns exactly the six fields per movie, with structured genres', async () => {
     const res = await request(app).get('/api/v1/movies?page=1');
     for (const movie of res.body.data as Record<string, unknown>[]) {
-      expect(Object.keys(movie).sort()).toEqual(
-        ['budget', 'genres', 'imdbId', 'releaseDate', 'title'].sort(),
-      );
+      expect(Object.keys(movie)).toEqual([
+        'movieId',
+        'imdbId',
+        'title',
+        'genres',
+        'releaseDate',
+        'budget',
+      ]);
       expect(Array.isArray(movie.genres)).toBe(true);
       for (const genre of movie.genres as Record<string, unknown>[]) {
         expect(Object.keys(genre).sort()).toEqual(['id', 'name']);
         expect(genre.id).toBeTypeOf('number');
         expect(genre.name).toBeTypeOf('string');
       }
-      expect(movie.budget).toBeTypeOf('number');
+      expect(movie.movieId).toBeTypeOf('number');
+      expect(movie.budget).toMatch(USD_PATTERN);
+    }
+  });
+
+  it('returns the stored movieId, which fetches the same movie from the details endpoint', async () => {
+    const page = await getPage('?page=3');
+    const expectedIds = (
+      suppliedMoviesDb()
+        .prepare('SELECT movieId FROM movies ORDER BY movieId LIMIT 50 OFFSET 100')
+        .all() as { movieId: number }[]
+    ).map((r) => r.movieId);
+    expect(page.data.map((m) => m.movieId)).toEqual(expectedIds);
+
+    for (const movie of page.data.slice(0, 5)) {
+      const res = await request(app).get(`/api/v1/movies/${String(movie.movieId)}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject(movie);
     }
   });
 
@@ -127,10 +153,10 @@ describe('GET /api/v1/movies: response shape (supplied database)', () => {
     expect(body.pagination).toEqual(V1_FIRST_PAGE_EXAMPLE.pagination);
   });
 
-  it('keeps zero budgets as 0 and dollar amounts unscaled', async () => {
+  it('formats budgets as US dollars, with a zero budget as $0', async () => {
     const [ariel, , fourRooms] = (await getPage('?page=1')).data;
-    expect(ariel?.budget).toBe(0);
-    expect(fourRooms?.budget).toBe(4000000);
+    expect(ariel?.budget).toBe('$0');
+    expect(fourRooms?.budget).toBe('$4,000,000');
   });
 
   it('returns null for a missing release date and the stored string otherwise', async () => {
@@ -141,11 +167,12 @@ describe('GET /api/v1/movies: response shape (supplied database)', () => {
     const page = Math.floor(position / 50) + 1;
     const movie = (await getPage(`?page=${String(page)}`)).data[position % 50];
     expect(movie).toEqual({
+      movieId: 38061,
       imdbId: 'tt0222730',
       title: "Anybody's Son Will Do",
       genres: [],
       releaseDate: null,
-      budget: 0,
+      budget: '$0',
     });
 
     // Date-only values are not shifted by the process time zone.

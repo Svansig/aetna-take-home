@@ -17,26 +17,59 @@ export const GenreSchema = z
 
 export type Genre = z.infer<typeof GenreSchema>;
 
+/**
+ * Fields shared by the listing and the details, as the repository returns them.
+ * `budget` is still the stored whole-dollar integer here; the service formats it
+ * for clients (see `formatUsd`).
+ */
+const summaryRecordShape = {
+  movieId: z
+    .int()
+    .min(1)
+    .meta({
+      description:
+        'Numeric movie id (a TMDB id). Use it to fetch the details: ' +
+        '`GET /movies/{movieId}`. Not an IMDb id.',
+      example: 5,
+    }),
+  imdbId: z.string().meta({
+    description:
+      'IMDb identifier, e.g. `tt0113101`. V1 returns the stored value as-is. A few ' +
+      'source records have an empty string here.',
+    example: 'tt0113101',
+  }),
+  title: z.string().meta({ example: 'Four Rooms' }),
+  genres: z.array(GenreSchema).meta({ description: 'May be empty.' }),
+  releaseDate: z.iso.date().nullable().meta({
+    description: 'Calendar date (`YYYY-MM-DD`) with no time zone. `null` when unknown.',
+    example: '1995-12-09',
+  }),
+};
+
+/** Internal listing record: public fields with the budget as whole dollars. */
+export const MovieSummaryRecordSchema = z.strictObject({
+  ...summaryRecordShape,
+  budget: z.int().min(0),
+});
+
+export type MovieSummaryRecord = z.infer<typeof MovieSummaryRecordSchema>;
+
+/** `$1,234,567`: whole US dollars, dollar sign and thousands separators, no cents. */
+export const USD_PATTERN = /^\$\d{1,3}(,\d{3})*$/;
+
+const usdBudget = () =>
+  z
+    .string()
+    .regex(USD_PATTERN)
+    .meta({
+      description:
+        'Production budget in whole US dollars, formatted with a dollar sign and ' +
+        'thousands separators, with no decimal portion. A stored `0` (usually "not recorded") is `$0`.',
+      example: '$4,000,000',
+    });
+
 export const MovieSummarySchema = z
-  .strictObject({
-    imdbId: z.string().meta({
-      description:
-        'IMDb identifier, e.g. `tt0113101`. V1 returns the stored value as-is. A few ' +
-        'source records have an empty string here.',
-      example: 'tt0113101',
-    }),
-    title: z.string().meta({ example: 'Four Rooms' }),
-    genres: z.array(GenreSchema).meta({ description: 'May be empty.' }),
-    releaseDate: z.iso.date().nullable().meta({
-      description: 'Calendar date (`YYYY-MM-DD`) with no time zone. `null` when unknown.',
-      example: '1995-12-09',
-    }),
-    budget: z.int().min(0).meta({
-      description:
-        'Production budget in whole US dollars (USD), as stored. `0` is returned as `0`.',
-      example: 4000000,
-    }),
-  })
+  .strictObject({ ...summaryRecordShape, budget: usdBudget() })
   .meta({ id: 'MovieSummary' });
 
 export type MovieSummary = z.infer<typeof MovieSummarySchema>;
@@ -172,11 +205,7 @@ export const ProductionCompanySchema = z
 
 export type ProductionCompany = z.infer<typeof ProductionCompanySchema>;
 
-/**
- * Single-movie details: the five listing fields, reused from `MovieSummarySchema`
- * so the two contracts can't drift, plus the detail-only fields.
- */
-export const MovieDetailsSchema = MovieSummarySchema.extend({
+const detailRecordShape = {
   description: z.string().nullable().meta({
     description: 'Plot overview, verbatim from the source. `null` when the source is empty.',
   }),
@@ -189,19 +218,6 @@ export const MovieDetailsSchema = MovieSummarySchema.extend({
         'Running time in minutes, as stored (not rounded). `null` when the source value is ' +
         'empty. `0` is returned as stored.',
       example: 121,
-    }),
-  averageRating: z
-    .number()
-    .min(0.5)
-    .max(5)
-    .nullable()
-    .meta({
-      description:
-        'Mean user rating on a 0.5–5.0 scale, rounded to 2 decimal places. `null` when no ' +
-        'ratings match. **V1 caveat:** ratings are matched by numeric movie id across ' +
-        'databases that use different id systems (TMDB vs MovieLens), so V1 averages may ' +
-        'belong to a different movie.',
-      example: 3.69,
     }),
   originalLanguage: z
     .string()
@@ -217,9 +233,32 @@ export const MovieDetailsSchema = MovieSummarySchema.extend({
       'May be empty. In V1, the 483 source records whose company data is malformed JSON ' +
       'return `[]` instead of failing the request.',
   }),
+};
+
+/** What a movie repository returns for one movie: everything except the rating, budget unformatted. */
+export const MovieRecordSchema = MovieSummaryRecordSchema.extend(detailRecordShape);
+
+export type MovieRecord = z.infer<typeof MovieRecordSchema>;
+
+/**
+ * Single-movie details: the listing fields, reused from `MovieSummarySchema` so
+ * the two contracts can't drift, plus the detail-only fields.
+ */
+export const MovieDetailsSchema = MovieSummarySchema.extend({
+  ...detailRecordShape,
+  averageRating: z
+    .number()
+    .min(0.5)
+    .max(5)
+    .nullable()
+    .meta({
+      description:
+        'Mean user rating on a 0.5–5.0 scale, rounded to 2 decimal places. `null` when no ' +
+        'ratings match. **V1 caveat:** ratings are matched by numeric movie id across ' +
+        'databases that use different id systems (TMDB vs MovieLens), so V1 averages may ' +
+        'belong to a different movie.',
+      example: 3.69,
+    }),
 }).meta({ id: 'MovieDetails' });
 
 export type MovieDetails = z.infer<typeof MovieDetailsSchema>;
-
-/** What a movie repository returns for one movie: everything except the rating. */
-export type MovieRecord = Omit<MovieDetails, 'averageRating'>;

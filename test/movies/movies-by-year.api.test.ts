@@ -16,6 +16,7 @@ import {
   createTestApp,
   createTestVersions,
   suppliedMoviesDb,
+  usd,
 } from '../helpers.js';
 
 const { app } = createTestApp();
@@ -32,7 +33,7 @@ async function getList(url: string, testApp = app): Promise<MovieListResponse> {
   expect(res.headers['content-type']).toMatch(/application\/json/);
   for (const movie of res.body.data as object[]) {
     expect(Object.keys(movie).sort()).toEqual(
-      ['budget', 'genres', 'imdbId', 'releaseDate', 'title'].sort(),
+      ['budget', 'genres', 'imdbId', 'movieId', 'releaseDate', 'title'].sort(),
     );
   }
   // Strict schemas: the shared MovieSummarySchema rejects any extra field.
@@ -58,11 +59,12 @@ async function getAllPages(url: (page: number) => string, testApp = app) {
 function oracle(year: string, direction: 'ASC' | 'DESC') {
   return suppliedMoviesDb()
     .prepare(
-      `SELECT imdbId, title, genres, releaseDate, budget FROM movies
+      `SELECT movieId, imdbId, title, genres, releaseDate, budget FROM movies
         WHERE substr(releaseDate, 1, 4) = ?
         ORDER BY releaseDate ${direction}, movieId ${direction}`,
     )
     .all(year) as {
+    movieId: number;
     imdbId: string;
     title: string;
     genres: string;
@@ -72,11 +74,12 @@ function oracle(year: string, direction: 'ASC' | 'DESC') {
 }
 
 const asSummary = (row: ReturnType<typeof oracle>[number]): MovieSummary => ({
+  movieId: row.movieId,
   imdbId: row.imdbId,
   title: row.title,
   genres: JSON.parse(row.genres) as MovieSummary['genres'],
   releaseDate: row.releaseDate,
-  budget: row.budget,
+  budget: usd(row.budget),
 });
 
 describe('movies by year (supplied database)', () => {
@@ -164,8 +167,8 @@ describe('movies by year (supplied database)', () => {
       const movies = (await getAllPages((page) => url('1999', `page=${String(page)}`))).flatMap(
         (p) => p.data,
       );
-      expect(movies.filter((m) => m.budget === 0)).toHaveLength(536);
-      expect(movies.filter((m) => m.budget > 0).length).toBeGreaterThan(0);
+      expect(movies.filter((m) => m.budget === '$0')).toHaveLength(536);
+      expect(movies.filter((m) => m.budget !== '$0').length).toBeGreaterThan(0);
       expect(movies.every((m) => MovieSummarySchema.safeParse(m).success)).toBe(true);
       expect(movies.every((m) => /^\d{4}-\d{2}-\d{2}$/.test(m.releaseDate!))).toBe(true);
       expect(movies.flatMap((m) => m.genres)[0]).toEqual({
@@ -319,7 +322,7 @@ describe('movies by year (fixtures)', () => {
     { movieId: 6, releaseDate: '9999-12-31' },
   ]);
   const fixtureApp = createTestApp({ versions: createTestVersions(db) }).app;
-  const ids = (body: MovieListResponse) => body.data.map((m) => Number(m.imdbId.slice(2)));
+  const ids = (body: MovieListResponse) => body.data.map((m) => m.movieId);
 
   it.each(Object.entries(STYLES))(
     'includes both year boundaries, excludes adjacent years and missing dates (%s style)',
@@ -341,9 +344,9 @@ describe('movies by year (fixtures)', () => {
     expect(ids(await getList(STYLES.path(year), fixtureApp))).toEqual(expected);
   });
 
-  it('keeps a zero budget as 0', async () => {
+  it('formats a zero budget as $0', async () => {
     const body = await getList(STYLES.path('1999'), fixtureApp);
-    expect(body.data.find((m) => m.imdbId === 'tt0000022')?.budget).toBe(0);
+    expect(body.data.find((m) => m.movieId === 22)?.budget).toBe('$0');
   });
 
   it('pages a large same-date tie without overlap or gaps, in both directions', async () => {

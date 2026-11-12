@@ -2,21 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../../src/http/errors.js';
 import type { PageWindow } from '../../src/http/pagination.js';
 import type { MovieRepository, RatingSource } from '../../src/movies/repository.js';
-import type { MovieRecord, MovieSummary } from '../../src/movies/schemas.js';
+import type { MovieRecord, MovieSummaryRecord } from '../../src/movies/schemas.js';
 import type { MovieListCriteria } from '../../src/movies/service.js';
 import {
   averageRating,
+  formatUsd,
   GenreNotFoundError,
   MovieNotFoundError,
   MovieService,
 } from '../../src/movies/service.js';
 
-const movie = (n: number): MovieSummary => ({
+const movie = (n: number): MovieSummaryRecord => ({
+  movieId: n,
   imdbId: `tt${String(n)}`,
   title: `Fixture ${String(n)}`,
   genres: [],
   releaseDate: null,
-  budget: 0,
+  budget: n * 1000,
 });
 
 /** In-memory repository over `count` synthetic movies, recording its calls. */
@@ -57,6 +59,18 @@ describe('MovieService.listMovies', () => {
       Array.from({ length: 50 }, (_, i) => `tt${String(51 + i)}`),
     );
     expect(result.pagination).toEqual({ page: 2, pageSize: 50, totalItems: 120, totalPages: 3 });
+  });
+
+  it('returns movieId and formats each budget in US dollars', () => {
+    const result = list(fakeRepository(3), {});
+    expect(result.data[1]).toEqual({
+      movieId: 2,
+      imdbId: 'tt2',
+      title: 'Fixture 2',
+      genres: [],
+      releaseDate: null,
+      budget: '$2,000',
+    });
   });
 
   it('returns the partial final page', () => {
@@ -146,11 +160,12 @@ describe('MovieService.listMovies', () => {
 });
 
 const record: MovieRecord = {
+  movieId: 7,
   imdbId: 'tt0000007',
   title: 'Fixture 7',
   description: null,
   releaseDate: '2000-01-01',
-  budget: 0,
+  budget: 1500000,
   runtime: 90.5,
   genres: [{ id: 18, name: 'Drama' }],
   originalLanguage: null,
@@ -167,8 +182,9 @@ describe('MovieService.getMovieDetails', () => {
 
     expect(repo.findMovieById).toHaveBeenCalledWith(7);
     expect(ratings.statsForMovie).toHaveBeenCalledWith(7);
-    expect(details).toEqual({ ...record, averageRating: 3.67 });
+    expect(details).toEqual({ ...record, budget: '$1,500,000', averageRating: 3.67 });
     expect(Object.keys(details)).toEqual([
+      'movieId',
       'imdbId',
       'title',
       'description',
@@ -220,5 +236,23 @@ describe('averageRating', () => {
     const result = averageRating(stats);
     expect(result).toBe(expected);
     if (result !== null) expect(result).toBeTypeOf('number');
+  });
+});
+
+describe('formatUsd', () => {
+  it.each([
+    [0, '$0'],
+    [7, '$7'],
+    [999, '$999'],
+    [1000, '$1,000'],
+    [4000000, '$4,000,000'],
+    [380000000, '$380,000,000'],
+    [Number.MAX_SAFE_INTEGER, '$9,007,199,254,740,991'],
+  ])('%d -> %s', (dollars, expected) => {
+    expect(formatUsd(dollars)).toBe(expected);
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])('rejects %d', (dollars) => {
+    expect(() => formatUsd(dollars)).toThrow(RangeError);
   });
 });

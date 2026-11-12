@@ -1,7 +1,14 @@
 import { HttpError } from '../http/errors.js';
 import { paginate } from '../http/pagination.js';
 import type { MovieRepository, MovieSort, RatingSource, RatingStats } from './repository.js';
-import type { GenreRef, MovieDetails, MovieListResponse, SortOrder } from './schemas.js';
+import type {
+  GenreRef,
+  MovieDetails,
+  MovieListResponse,
+  MovieSummary,
+  MovieSummaryRecord,
+  SortOrder,
+} from './schemas.js';
 
 /** A valid movie id that doesn't exist. The central handler turns it into a 404. */
 export class MovieNotFoundError extends HttpError {
@@ -44,6 +51,29 @@ export function averageRating({ sum, count }: RatingStats): number | null {
   return Math.round((sum * 100) / count) / 100;
 }
 
+const USD = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+/**
+ * A whole-dollar amount as clients see it: `4000000` -> `$4,000,000`. The
+ * locale and currency are fixed, so output never depends on the host's settings.
+ */
+export function formatUsd(dollars: number): string {
+  if (!Number.isSafeInteger(dollars) || dollars < 0) {
+    throw new RangeError('dollars must be a non-negative safe integer');
+  }
+  return USD.format(dollars);
+}
+
+/** The public listing item for a repository record. */
+function toPublicSummary(record: MovieSummaryRecord): MovieSummary {
+  return { ...record, budget: formatUsd(record.budget) };
+}
+
 /** Movie use cases, shared by every API version and independent of Express. */
 export class MovieService {
   constructor(
@@ -71,7 +101,7 @@ export class MovieService {
       order: sortOrder,
     };
     return paginate(page, this.repository.countMovies(filter), (window) =>
-      this.repository.listMovies(filter, sort, window),
+      this.repository.listMovies(filter, sort, window).map(toPublicSummary),
     );
   }
 
@@ -81,11 +111,12 @@ export class MovieService {
     if (movie === undefined) throw new MovieNotFoundError(movieId);
 
     return {
+      movieId: movie.movieId,
       imdbId: movie.imdbId,
       title: movie.title,
       description: movie.description,
       releaseDate: movie.releaseDate,
-      budget: movie.budget,
+      budget: formatUsd(movie.budget),
       runtime: movie.runtime,
       averageRating: averageRating(this.ratings.statsForMovie(movieId)),
       genres: movie.genres,

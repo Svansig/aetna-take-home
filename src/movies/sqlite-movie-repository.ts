@@ -4,11 +4,11 @@ import { DataIntegrityError } from '../db/sqlite.js';
 import type { PageWindow } from '../http/pagination.js';
 import type { MovieFilter, MovieRepository, MovieSort } from './repository.js';
 import {
-  MovieDetailsSchema,
-  MovieSummarySchema,
+  MovieRecordSchema,
+  MovieSummaryRecordSchema,
   type GenreRef,
   type MovieRecord,
-  type MovieSummary,
+  type MovieSummaryRecord,
   type SortOrder,
 } from './schemas.js';
 
@@ -67,8 +67,7 @@ const ORDER_BY = {
  *
  * Statements are prepared once per connection. `movieId` is the table's INTEGER
  * PRIMARY KEY (the rowid), so ordering by it, LIMIT/OFFSET and lookup by id use
- * the table's own b-tree and need no extra index. `movieId` is selected only to
- * identify rows in integrity errors; it isn't part of the public record.
+ * the table's own b-tree and need no extra index.
  */
 export class SqliteMovieRepository implements MovieRepository {
   private readonly countStatement: StatementSync;
@@ -107,7 +106,7 @@ export class SqliteMovieRepository implements MovieRepository {
     return row?.total ?? 0;
   }
 
-  listMovies(filter: MovieFilter, sort: MovieSort, window: PageWindow): MovieSummary[] {
+  listMovies(filter: MovieFilter, sort: MovieSort, window: PageWindow): MovieSummaryRecord[] {
     return this.listStatements[sort.by][sort.order]
       .all({ ...filterParams(filter), ...checkedWindow(window) })
       .map(toMovieSummary);
@@ -190,6 +189,7 @@ function summaryFields(row: MovieRow) {
     throw integrityError(row.movieId, ['genres: not valid JSON']);
   }
   return {
+    movieId: row.movieId,
     imdbId: row.imdbId,
     title: row.title,
     genres,
@@ -212,20 +212,20 @@ function parseProductionCompanies(text: string): unknown {
   }
 }
 
-/** Map a stored listing row to the public summary, refusing anything malformed. */
-export function toMovieSummary(raw: unknown): MovieSummary {
+/** Map a stored listing row to a summary record, refusing anything malformed. */
+export function toMovieSummary(raw: unknown): MovieSummaryRecord {
   const row = parseRow(MovieRowSchema, raw);
-  const summary = MovieSummarySchema.safeParse(summaryFields(row));
+  const summary = MovieSummaryRecordSchema.safeParse(summaryFields(row));
   if (!summary.success) {
     throw integrityError(row.movieId, describeIssues(summary.error));
   }
   return summary.data;
 }
 
-/** Map a stored detail row to a movie record (all public fields except the rating). */
+/** Map a stored detail row to a movie record (every field except the rating; budget unformatted). */
 export function toMovieRecord(raw: unknown): MovieRecord {
   const row = parseRow(MovieDetailsRowSchema, raw);
-  const record = MovieDetailsSchema.omit({ averageRating: true }).safeParse({
+  const record = MovieRecordSchema.safeParse({
     ...summaryFields(row),
     description: emptyToNull(row.overview),
     runtime: emptyToNull(row.runtime),

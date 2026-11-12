@@ -15,6 +15,7 @@ import {
 } from '../helpers.js';
 
 const DETAIL_FIELDS = [
+  'movieId',
   'imdbId',
   'title',
   'description',
@@ -90,13 +91,14 @@ describe('GET /api/v1/movies/:movieId (supplied databases)', () => {
     expect(movie.description).toBe(raw.overview);
     expect(movie.runtime).toBe(raw.runtime);
     expect(movie.runtime).toBeTypeOf('number');
-    expect(movie.budget).toBe(4000000);
+    expect(movie.budget).toBe('$4,000,000');
     expect(movie.genres).toEqual(JSON.parse(raw.genres));
   });
 
-  it('keeps a zero budget as 0 and the release date verbatim (Ariel, movieId 2)', async () => {
+  it('formats a zero budget as $0 and keeps the release date verbatim (Ariel, movieId 2)', async () => {
     const movie = await getDetails(2);
-    expect(movie.budget).toBe(0);
+    expect(movie.movieId).toBe(2);
+    expect(movie.budget).toBe('$0');
     expect(movie.releaseDate).toBe('1988-10-21');
     expect(movie.originalLanguage).toBeNull();
   });
@@ -174,11 +176,11 @@ describe('GET /api/v1/movies/:movieId (supplied databases)', () => {
     });
   });
 
-  it('leaves the listing contract unchanged (five fields)', async () => {
+  it('shares its listing fields with the listing (six fields)', async () => {
     const res = await request(app).get('/api/v1/movies');
     expect(res.status).toBe(200);
     expect(Object.keys(res.body.data[0] as object).sort()).toEqual(
-      ['budget', 'genres', 'imdbId', 'releaseDate', 'title'].sort(),
+      ['budget', 'genres', 'imdbId', 'movieId', 'releaseDate', 'title'].sort(),
     );
   });
 });

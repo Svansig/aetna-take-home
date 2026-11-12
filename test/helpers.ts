@@ -115,3 +115,11 @@ export function createFixtureRatingsDb(ratings: [movieId: number, rating: number
   ratings.forEach(([movieId, rating], i) => insert.run(i + 1, movieId, rating));
   return db;
 }
+
+/**
+ * Test oracle for budgets: whole dollars as `$1,234,567`. Deliberately built
+ * with a regex rather than `Intl.NumberFormat`, so it is independent of `formatUsd`.
+ */
+export function usd(dollars: number): string {
+  return `$${String(dollars).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+}

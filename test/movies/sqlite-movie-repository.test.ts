@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DataIntegrityError } from '../../src/db/sqlite.js';
 import type { MovieFilter, MovieSort } from '../../src/movies/repository.js';
-import { MovieSummarySchema } from '../../src/movies/schemas.js';
+import { MovieSummaryRecordSchema } from '../../src/movies/schemas.js';
 import {
   SqliteMovieRepository,
   toMovieRecord,
@@ -28,7 +28,7 @@ describe('SqliteMovieRepository (fixtures)', () => {
     expect(repo.countMovies(ALL)).toBe(3);
   });
 
-  it('maps a row to exactly the five public fields', () => {
+  it('maps a row to exactly the six summary fields, budget in whole dollars', () => {
     const db = createFixtureMoviesDb([
       {
         movieId: 1,
@@ -41,6 +41,7 @@ describe('SqliteMovieRepository (fixtures)', () => {
     ]);
     expect(new SqliteMovieRepository(db).listMovies(ALL, BY_ID, { limit: 1, offset: 0 })).toEqual([
       {
+        movieId: 1,
         imdbId: 'tt1234567',
         title: 'A',
         genres: [
@@ -115,8 +116,11 @@ describe('SqliteMovieRepository (supplied movies.db)', () => {
   it('maps every stored row without integrity errors, matching the raw values', () => {
     const movies = repo.listMovies(ALL, BY_ID, { limit: 50_000, offset: 0 });
     const raw = db
-      .prepare('SELECT imdbId, title, genres, releaseDate, budget FROM movies ORDER BY movieId')
+      .prepare(
+        'SELECT movieId, imdbId, title, genres, releaseDate, budget FROM movies ORDER BY movieId',
+      )
       .all() as {
+      movieId: number;
       imdbId: string;
       title: string;
       genres: string;
@@ -127,7 +131,8 @@ describe('SqliteMovieRepository (supplied movies.db)', () => {
     expect(movies).toHaveLength(45430);
     movies.forEach((movie, i) => {
       const row = raw[i]!;
-      expect(MovieSummarySchema.safeParse(movie).success).toBe(true);
+      expect(MovieSummaryRecordSchema.safeParse(movie).success).toBe(true);
+      expect(movie.movieId).toBe(row.movieId);
       expect(movie.imdbId).toBe(row.imdbId);
       expect(movie.title).toBe(row.title);
       expect(movie.genres).toEqual(JSON.parse(row.genres));
@@ -162,6 +167,7 @@ describe('SqliteMovieRepository.findMovieById (fixtures)', () => {
         productionCompanies: '[{"name": "Lucasfilm", "id": 1}, {"name": "Fox", "id": 306}]',
       }),
     ).toEqual({
+      movieId: 7,
       imdbId: 'tt1234567',
       title: 'A',
       description: 'Plot "with quotes" and\nnewlines.  ',
@@ -263,6 +269,7 @@ describe('SqliteMovieRepository.findMovieById (supplied movies.db)', () => {
     const [listed] = repo.listMovies(ALL, BY_ID, { limit: 1, offset: 0 });
     const record = repo.findMovieById(2)!;
     expect({
+      movieId: record.movieId,
       imdbId: record.imdbId,
       title: record.title,
       genres: record.genres,
