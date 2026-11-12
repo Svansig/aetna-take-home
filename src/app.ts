@@ -3,6 +3,7 @@ import type { DatabaseSync } from './db/sqlite.js';
 import { buildOpenApiDocument, docsRouter } from './docs/openapi.js';
 import { errorHandler, notFoundHandler } from './http/errors.js';
 import { healthRouter } from './http/health.js';
+import { landingPage } from './http/landing.js';
 import { requestLogger } from './http/request-logger.js';
 import type { Logger } from './logger.js';
 import { NaiveSqliteRatingSource } from './movies/naive-sqlite-rating-source.js';
@@ -48,6 +49,7 @@ export function createApp({ logger, apiRouter }: AppDependencies): Express {
   app.disable('x-powered-by');
 
   app.use(requestLogger(logger));
+  app.use(landingPage());
   app.use(healthRouter());
   app.use(docsRouter(buildOpenApiDocument(API_BASE_PATH)));
   app.use(API_BASE_PATH, apiRouter);

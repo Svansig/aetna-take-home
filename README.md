@@ -42,7 +42,8 @@ npm run dev        # tsx watch, logs pretty-printed through pino-pretty
 ```
 
 npm may report blocked install scripts for `esbuild` and `@scarf/scarf`; neither
-is needed. Then open <http://127.0.0.1:3000/docs>.
+is needed. Then open <http://127.0.0.1:3000/> for the landing page, or
+<http://127.0.0.1:3000/docs> for Swagger UI.
 
 | Script                  | Purpose                                    |
 | ----------------------- | ------------------------------------------ |
@@ -82,6 +83,7 @@ There are no secrets.
 | `GET /api/v1/movies/{movieId}`     | One movie's details with its average rating |
 | `GET /api/v1/movies/year/{year}`   | Movies released in a year, chronologically  |
 | `GET /api/v1/movies/genre/{genre}` | Movies in a genre                           |
+| `GET /`                            | Landing page (static, from `public/`)       |
 | `GET /health`                      | Liveness (does not touch the databases)     |
 | `GET /docs`, `GET /openapi.json`   | Swagger UI and the OpenAPI 3.1 document     |
 
@@ -208,7 +210,8 @@ docker compose down
 ```
 
 - The image is a multi-stage build on `node:26.13.0-slim` with production
-  dependencies only. It runs as the non-root `node` user, has a `/health`
+  dependencies only, plus the compiled `dist/` and the static landing page in
+  `public/`. It runs as the non-root `node` user, has a `/health`
   `HEALTHCHECK`, and starts `node` directly so SIGTERM triggers graceful shutdown.
 - Databases are not baked in. Compose mounts `db/movies.db` and `db/ratings.db`
   **read-only**, runs with a read-only root filesystem, all capabilities dropped,

@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Movie Services API</title>
+    <meta
+      name="description"
+      content="A read-only TypeScript/Express API over the supplied movie and ratings SQLite databases."
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Movie API code test</p>
+        <h1>Movie Services API</h1>
+        <p class="lede">
+          A read-only TypeScript and Express API over the two supplied SQLite databases,
+          <code>movies.db</code> and <code>ratings.db</code>, which are used unmodified.
+        </p>
+        <nav class="actions" aria-label="Primary">
+          <a class="button primary" href="/docs/">Open the API docs</a>
+          <a class="button" href="https://github.com/Svansig/aetna-take-home">View on GitHub</a>
+        </nav>
+      </header>
+
+      <section aria-labelledby="stories">
+        <h2 id="stories">User stories</h2>
+        <p>
+          All four user stories from the brief are implemented under <code>/api/v1</code>. Each
+          example link below calls the live API.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Story</th>
+                <th scope="col">Endpoint</th>
+                <th scope="col">Example</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>List all movies</td>
+                <td><code>GET /api/v1/movies</code></td>
+                <td><a href="/api/v1/movies">/api/v1/movies</a></td>
+              </tr>
+              <tr>
+                <td>Movie details</td>
+                <td><code>GET /api/v1/movies/{movieId}</code></td>
+                <td><a href="/api/v1/movies/11">/api/v1/movies/11</a></td>
+              </tr>
+              <tr>
+                <td>Movies by year</td>
+                <td><code>GET /api/v1/movies/year/{year}</code></td>
+                <td><a href="/api/v1/movies/year/1999">/api/v1/movies/year/1999</a></td>
+              </tr>
+              <tr>
+                <td>Movies by genre</td>
+                <td><code>GET /api/v1/movies/genre/{genre}</code></td>
+                <td><a href="/api/v1/movies/genre/Action">/api/v1/movies/genre/Action</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Listings return 50 movies per page (<code>?page=2</code>), accept
+          <code>sortOrder=asc|desc</code>, and <code>/api/v1/movies</code> can combine
+          <code>year</code> and <code>genre</code> filters, for example
+          <a href="/api/v1/movies?year=1999&amp;genre=Action">?year=1999&amp;genre=Action</a>.
+        </p>
+      </section>
+
+      <aside class="callout" aria-labelledby="limitation">
+        <h2 id="limitation">Known data limitation</h2>
+        <p>
+          <strong>Average ratings may belong to a different movie.</strong> The movies database uses
+          TMDB ids and the ratings database uses MovieLens ids, and ratings are matched by the raw
+          number. The data is served as supplied, without repair. See
+          <a href="https://github.com/Svansig/aetna-take-home/blob/main/docs/ASSUMPTIONS.md"
+            >the documented assumptions</a
+          >.
+        </p>
+      </aside>
+
+      <section aria-labelledby="explore">
+        <h2 id="explore">Explore</h2>
+        <ul class="cards">
+          <li>
+            <a href="/docs/"><strong>Swagger UI</strong></a>
+            <span>Interactive documentation with “Try it out”.</span>
+          </li>
+          <li>
+            <a href="/openapi.json"><strong>OpenAPI 3.1</strong></a>
+            <span>Generated from the same Zod schemas that validate requests.</span>
+          </li>
+          <li>
+            <a href="/health"><strong>Health</strong></a>
+            <span>Liveness check; does not touch the databases.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section aria-labelledby="source">
+        <h2 id="source">Source on GitHub</h2>
+        <ul class="cards">
+          <li>
+            <a href="https://github.com/Svansig/aetna-take-home"><strong>Repository</strong></a>
+            <span>Svansig/aetna-take-home</span>
+          </li>
+          <li>
+            <a href="https://github.com/Svansig/aetna-take-home/blob/main/README.md"
+              ><strong>README</strong></a
+            >
+            <span>Stack, setup, configuration, endpoints and testing.</span>
+          </li>
+          <li>
+            <a href="https://github.com/Svansig/aetna-take-home/blob/main/ASSIGNMENT.md"
+              ><strong>Assignment</strong></a
+            >
+            <span>The original brief and acceptance criteria.</span>
+          </li>
+          <li>
+            <a href="https://github.com/Svansig/aetna-take-home/blob/main/docs/ASSUMPTIONS.md"
+              ><strong>Assumptions</strong></a
+            >
+            <span>Every interpretation of the brief, recorded.</span>
+          </li>
+          <li>
+            <a href="https://github.com/Svansig/aetna-take-home/blob/main/docs/DEPLOYMENT.md"
+              ><strong>Deployment</strong></a
+            >
+            <span>How this instance is built, published and updated.</span>
+          </li>
+          <li>
+            <a href="https://github.com/Svansig/aetna-take-home/actions"
+              ><strong>CI runs</strong></a
+            >
+            <span>Format, lint, typecheck, tests and build on every change.</span>
+          </li>
+        </ul>
+      </section>
+
+      <footer>
+        <p>
+          Built with Node.js, TypeScript, Express 5, Zod and SQLite.
+          <a href="https://github.com/Svansig/aetna-take-home">Source</a>
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>
