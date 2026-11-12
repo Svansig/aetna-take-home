@@ -1,0 +1,25 @@
+# Dependencies & build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local environment (see .env.example)
+.env
+.env.*
+!.env.example
+
+# Large Kaggle source files (see README: "Source data")
+kaggle/
+
+# Generated / temporary databases. The supplied db/movies.db and db/ratings.db ARE tracked.
+data/
+*.db-journal
+*.db-wal
+*.db-shm
+*.tmp.db
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

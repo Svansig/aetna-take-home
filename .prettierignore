@@ -1,0 +1,6 @@
+dist/
+coverage/
+db/
+kaggle/
+package-lock.json
+ASSIGNMENT.md

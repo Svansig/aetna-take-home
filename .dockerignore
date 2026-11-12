@@ -1,0 +1,16 @@
+# Keep the build context small and free of local state.
+node_modules
+dist
+coverage
+kaggle
+db
+data
+test
+.env
+.env.*
+.git
+.gitignore
+*.md
+Dockerfile
+compose.yaml
+.dockerignore
