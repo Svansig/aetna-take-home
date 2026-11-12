@@ -25,7 +25,10 @@ conventions. Only the data behind them differs.
 
 ## Status
 
-No movie operations are implemented yet. Only the operations listed below exist.
+\`/api/v1\` implements every movie operation listed below. Its average ratings
+are matched to movies by a mismatched id and may belong to a different movie
+(see \`GET /api/v1/movies/{movieId}\`). \`/api/v2\` is mounted but has no
+operations yet, so its requests return 404.
 
 ## Conventions
 
