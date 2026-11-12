@@ -9,15 +9,13 @@ coverage/
 .env.*
 !.env.example
 
-# Large Kaggle source files (see README: "Source data")
+# Local reference data, not part of the project
 kaggle/
 
-# Generated / temporary databases. The supplied db/movies.db and db/ratings.db ARE tracked.
-data/
+# SQLite side files. The supplied db/movies.db and db/ratings.db ARE tracked.
 *.db-journal
 *.db-wal
 *.db-shm
-*.tmp.db
 
 # OS / editor
 .DS_Store

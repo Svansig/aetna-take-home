@@ -1,10 +1,10 @@
 import { DatabaseSync } from 'node:sqlite';
 import { Writable } from 'node:stream';
-import { createApp } from '../src/app.js';
+import type { Router } from 'express';
+import { createApp, createMoviesApi } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { openReadOnlyDatabase } from '../src/db/sqlite.js';
 import { createLogger } from '../src/logger.js';
-import { createApiVersions, type ApiVersion } from '../src/versions.js';
 
 /** Captures structured log lines emitted during a test. */
 export function createLogCapture() {
@@ -29,29 +29,29 @@ let suppliedRatings: DatabaseSync | undefined;
  * modify them.
  */
 export function suppliedMoviesDb(): DatabaseSync {
-  suppliedMovies ??= openReadOnlyDatabase(loadConfig({}).V1_MOVIES_DB_PATH);
+  suppliedMovies ??= openReadOnlyDatabase(loadConfig({}).MOVIES_DB_PATH);
   return suppliedMovies;
 }
 
 export function suppliedRatingsDb(): DatabaseSync {
-  suppliedRatings ??= openReadOnlyDatabase(loadConfig({}).V1_RATINGS_DB_PATH);
+  suppliedRatings ??= openReadOnlyDatabase(loadConfig({}).RATINGS_DB_PATH);
   return suppliedRatings;
 }
 
-/** The production version wiring, backed by the supplied databases by default. */
-export function createTestVersions(
+/** The production movie API wiring, backed by the supplied databases by default. */
+export function createTestApiRouter(
   moviesDb: DatabaseSync = suppliedMoviesDb(),
   ratingsDb: DatabaseSync = suppliedRatingsDb(),
-): ApiVersion[] {
-  return createApiVersions({ v1MoviesDb: moviesDb, v1RatingsDb: ratingsDb });
+): Router {
+  return createMoviesApi({ moviesDb, ratingsDb });
 }
 
 /** Build the app with injected test dependencies. No network listener is opened. */
-export function createTestApp(options: { versions?: ApiVersion[] } = {}) {
+export function createTestApp(options: { apiRouter?: Router } = {}) {
   const logs = createLogCapture();
   const app = createApp({
     logger: logs.logger,
-    versions: options.versions ?? createTestVersions(),
+    apiRouter: options.apiRouter ?? createTestApiRouter(),
   });
   return { app, logs: logs.lines };
 }

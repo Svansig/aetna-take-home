@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { V1_FIRST_PAGE_EXAMPLE } from '../../src/movies/routes.js';
+import { FIRST_PAGE_EXAMPLE } from '../../src/movies/routes.js';
 import {
   MovieListResponseSchema,
   USD_PATTERN,
@@ -9,7 +9,7 @@ import {
 import {
   createFixtureMoviesDb,
   createTestApp,
-  createTestVersions,
+  createTestApiRouter,
   suppliedMoviesDb,
 } from '../helpers.js';
 
@@ -149,8 +149,8 @@ describe('GET /api/v1/movies: response shape (supplied database)', () => {
 
   it('matches the documented page-1 example (real records, verbatim)', async () => {
     const body = await getPage('?page=1');
-    expect(body.data.slice(0, 3)).toEqual(V1_FIRST_PAGE_EXAMPLE.data);
-    expect(body.pagination).toEqual(V1_FIRST_PAGE_EXAMPLE.pagination);
+    expect(body.data.slice(0, 3)).toEqual(FIRST_PAGE_EXAMPLE.data);
+    expect(body.pagination).toEqual(FIRST_PAGE_EXAMPLE.pagination);
   });
 
   it('formats budgets as US dollars, with a zero budget as $0', async () => {
@@ -183,7 +183,7 @@ describe('GET /api/v1/movies: response shape (supplied database)', () => {
 describe('GET /api/v1/movies: failures reach the central error handler', () => {
   it('returns a generic 500 for malformed stored genres, logging the row id', async () => {
     const db = createFixtureMoviesDb([{ movieId: 42, genres: '[{"id": 18, "name": ' }]);
-    const { app: fixtureApp, logs } = createTestApp({ versions: createTestVersions(db) });
+    const { app: fixtureApp, logs } = createTestApp({ apiRouter: createTestApiRouter(db) });
 
     const res = await request(fixtureApp).get('/api/v1/movies');
     expect(res.status).toBe(500);
@@ -199,7 +199,7 @@ describe('GET /api/v1/movies: failures reach the central error handler', () => {
 
   it('returns a generic 500 when the database is unavailable', async () => {
     const db = createFixtureMoviesDb([{ movieId: 1 }]);
-    const { app: fixtureApp } = createTestApp({ versions: createTestVersions(db) });
+    const { app: fixtureApp } = createTestApp({ apiRouter: createTestApiRouter(db) });
     db.close();
 
     const res = await request(fixtureApp).get('/api/v1/movies');
@@ -210,7 +210,7 @@ describe('GET /api/v1/movies: failures reach the central error handler', () => {
 
   it('reports an empty collection with totalPages 0', async () => {
     const { app: fixtureApp } = createTestApp({
-      versions: createTestVersions(createFixtureMoviesDb([])),
+      apiRouter: createTestApiRouter(createFixtureMoviesDb([])),
     });
     const res = await request(fixtureApp).get('/api/v1/movies');
     expect(res.status).toBe(200);
@@ -218,12 +218,5 @@ describe('GET /api/v1/movies: failures reach the central error handler', () => {
       data: [],
       pagination: { page: 1, pageSize: 50, totalItems: 0, totalPages: 0 },
     });
-  });
-});
-
-describe('V2 movie listing', () => {
-  it('is not implemented', async () => {
-    const res = await request(app).get('/api/v2/movies');
-    expect(res.status).toBe(404);
   });
 });

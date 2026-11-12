@@ -21,11 +21,10 @@ services:
       NODE_ENV: production
       LOG_LEVEL: ${AETNA_LOG_LEVEL:-info}
       # Paths inside the container (same as the image defaults and compose.yaml).
-      V1_MOVIES_DB_PATH: /app/db/movies.db
-      V1_RATINGS_DB_PATH: /app/db/ratings.db
-      V2_DB_PATH: /app/data/v2/movies.db
+      MOVIES_DB_PATH: /app/db/movies.db
+      RATINGS_DB_PATH: /app/db/ratings.db
     volumes:
-      # V1 datasets, provisioned on the host independently of image releases.
+      # The supplied datasets, provisioned on the host independently of image releases.
       # create_host_path: false makes a missing file an error instead of an
       # empty directory silently created by Docker.
       - type: bind
@@ -38,13 +37,6 @@ services:
         target: /app/db/ratings.db
         read_only: true
         bind: { create_host_path: false }
-      # V2 (future): uncomment when a release requires the v2 dataset; the
-      # updater validates it before deploying such a release (see docs/DEPLOYMENT.md).
-      # - type: bind
-      #   source: ${AETNA_DATA_DIR}/v2
-      #   target: /app/data/v2
-      #   read_only: true
-      #   bind: { create_host_path: false }
     # Same hardening as compose.yaml. The image runs as the non-root `node` user.
     read_only: true
     cap_drop: [ALL]

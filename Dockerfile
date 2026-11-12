@@ -28,9 +28,8 @@ WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
-    V1_MOVIES_DB_PATH=/app/db/movies.db \
-    V1_RATINGS_DB_PATH=/app/db/ratings.db \
-    V2_DB_PATH=/app/data/v2/movies.db
+    MOVIES_DB_PATH=/app/db/movies.db \
+    RATINGS_DB_PATH=/app/db/ratings.db
 
 # Application files stay root-owned, so the non-root process can't modify them.
 COPY package.json ./

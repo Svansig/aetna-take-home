@@ -3,11 +3,10 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ErrorResponseSchema, HttpError } from '../src/http/errors.js';
-import type { ApiVersion } from '../src/versions.js';
 import { createTestApp } from './helpers.js';
 
-/** A v1 router with routes that fail in controlled ways, to exercise the shared handler. */
-function failingVersion(): ApiVersion {
+/** An API router with routes that fail in controlled ways, to exercise the shared handler. */
+function failingRouter(): Router {
   const router = Router();
   router.get('/boom', () => {
     throw new Error('SELECT * FROM secret_table at /srv/app/db/movies.db');
@@ -26,7 +25,7 @@ function failingVersion(): ApiVersion {
   router.get('/teapot', () => {
     throw new HttpError(418, 'TEAPOT', 'Short and stout');
   });
-  return { id: 'v1', router };
+  return router;
 }
 
 describe('error handling', () => {
@@ -43,7 +42,7 @@ describe('error handling', () => {
   });
 
   it.each(['/api/v1', '/api/v1/unknown', '/api/v2', '/api/v2/movies'])(
-    'returns 404 for unregistered routes under version prefixes: %s',
+    'returns 404 for unregistered routes under API prefixes: %s',
     async (url) => {
       const { app } = createTestApp();
       const res = await request(app).get(url);
@@ -55,7 +54,7 @@ describe('error handling', () => {
   it.each(['/api/v1/boom', '/api/v1/async-boom'])(
     'returns a generic 500 and logs the real error for %s',
     async (url) => {
-      const { app, logs } = createTestApp({ versions: [failingVersion()] });
+      const { app, logs } = createTestApp({ apiRouter: failingRouter() });
       const res = await request(app).get(url);
 
       expect(res.status).toBe(500);
@@ -75,7 +74,7 @@ describe('error handling', () => {
   );
 
   it('maps Zod validation errors to 400 with field details', async () => {
-    const { app } = createTestApp({ versions: [failingVersion()] });
+    const { app } = createTestApp({ apiRouter: failingRouter() });
     const res = await request(app).get('/api/v1/validate?page=abc');
     expect(res.status).toBe(400);
     expect(ErrorResponseSchema.parse(res.body)).toBeTruthy();
@@ -86,14 +85,14 @@ describe('error handling', () => {
   });
 
   it('passes through HttpError status and code', async () => {
-    const { app } = createTestApp({ versions: [failingVersion()] });
+    const { app } = createTestApp({ apiRouter: failingRouter() });
     const res = await request(app).get('/api/v1/teapot');
     expect(res.status).toBe(418);
     expect(res.body.error).toMatchObject({ code: 'TEAPOT', message: 'Short and stout' });
   });
 
   it('maps Express client errors (malformed path parameter encoding) to 400', async () => {
-    const { app } = createTestApp({ versions: [failingVersion()] });
+    const { app } = createTestApp({ apiRouter: failingRouter() });
     const res = await request(app).get('/api/v1/items/%E0%A4%A');
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('BAD_REQUEST');

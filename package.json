@@ -2,7 +2,7 @@
   "name": "movie-services",
   "version": "0.1.0",
   "private": true,
-  "description": "Read-only movie API over the supplied SQLite datasets (versioned v1/v2).",
+  "description": "Read-only movie API over the supplied SQLite datasets.",
   "type": "module",
   "engines": {
     "node": ">=26"

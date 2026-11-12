@@ -482,7 +482,7 @@ describe('SqliteMovieRepository genre filter (supplied movies.db)', () => {
     return { ...row, ids: new Set(list.map((genre) => genre.id)) };
   });
 
-  it('has the 20 known V1 genres', () => {
+  it('has the 20 known genres', () => {
     expect(genres.size).toBe(20);
     expect(genres.get(28)).toBe('Action');
   });

@@ -6,35 +6,37 @@ import swaggerUi from 'swagger-ui-express';
 import { PROJECT_ROOT } from '../config.js';
 import { ErrorResponseSchema } from '../http/errors.js';
 import { registerHealthDocs } from '../http/health.js';
-import { apiBasePath, type ApiVersion } from '../versions.js';
+import { registerMoviesDocs } from '../movies/routes.js';
 
 export type OpenApiDocument = ReturnType<OpenApiGeneratorV31['generateDocument']>;
 
 const DESCRIPTION = `
-Read-only API over a movie metadata dataset and a user ratings dataset.
+Read-only API over the supplied movie metadata and user ratings SQLite
+databases, which are used unmodified.
 
-## Versions
+## Operations
 
-| Prefix | Dataset | Notes |
-| --- | --- | --- |
-| \`/api/v1\` | The original supplied SQLite databases, used unmodified. | Preserves known source-data limitations (for example, the movies and ratings databases use different movie identifier systems). |
-| \`/api/v2\` | A dataset rebuilt from the original Kaggle source files. | Planned: corrected identifier mappings and data transformations. |
+* \`GET /api/v1/movies\`: every movie, 50 per page, optionally filtered by
+  \`year\` and/or \`genre\` (combined with AND).
+* \`GET /api/v1/movies/{movieId}\`: one movie with its average rating.
+* \`GET /api/v1/movies/year/{year}\`: movies released in a year, chronologically.
+* \`GET /api/v1/movies/genre/{genre}\`: movies in a genre, by name or id.
 
-Both versions share request validation, response schemas, pagination and error
-conventions. Only the data behind them differs.
+## Known source-data limitations
 
-## Status
+The supplied data is served as-is, without repair:
 
-\`/api/v1\` implements every movie operation listed below. Its average ratings
-are matched to movies by a mismatched id and may belong to a different movie
-(see \`GET /api/v1/movies/{movieId}\`). \`/api/v2\` is mounted but has no
-operations yet, so its requests return 404.
+* **Average ratings may belong to a different movie.** The movies database uses
+  TMDB ids and the ratings database uses MovieLens ids, and ratings are matched by
+  the raw number (see \`GET /api/v1/movies/{movieId}\`).
+* \`originalLanguage\` is always \`null\`: the supplied database has no values.
+* \`productionCompanies\` is \`[]\` for the 483 movies whose stored JSON is malformed.
+* A stored budget of \`0\` is returned as \`$0\`.
 
 ## Conventions
 
 * Every error response uses the \`ErrorResponse\` schema.
-* Operations are tagged \`<Resource> (<version>)\`, for example \`Movies (v1)\`.
-  Version-independent endpoints use the \`Operations\` tag.
+* Movie operations use the \`Movies\` tag; \`/health\` uses \`Operations\`.
 `.trim();
 
 function readPackageVersion(): string {
@@ -45,19 +47,17 @@ function readPackageVersion(): string {
 }
 
 /**
- * Build the OpenAPI 3.1 document from Zod schemas registered by shared
- * infrastructure and by each mounted API version.
+ * Build the OpenAPI 3.1 document from the Zod schemas of `/health` and of the
+ * movie operations mounted under `apiBasePath`.
  */
-export function buildOpenApiDocument(versions: readonly ApiVersion[]): OpenApiDocument {
+export function buildOpenApiDocument(apiBasePath: string): OpenApiDocument {
   const registry = new OpenAPIRegistry();
   registerHealthDocs(registry);
-  for (const version of versions) {
-    version.registerDocs?.(registry, apiBasePath(version.id));
-  }
+  registerMoviesDocs(registry, apiBasePath);
 
   // Schemas named via `.meta({ id })` become components automatically when an
   // operation references them. ErrorResponse is passed explicitly so the shared
-  // error contract is published even before any operation can return it.
+  // error contract is always published as a named component.
   // (A schema definition entry is used rather than `registry.register`, which
   // requires the global `extendZodWithOpenApi` patch.)
   const definitions = [
@@ -74,7 +74,10 @@ export function buildOpenApiDocument(versions: readonly ApiVersion[]): OpenApiDo
     },
     // Relative URL: works unchanged behind a reverse proxy or Cloudflare Tunnel.
     servers: [{ url: '/', description: 'This server' }],
-    tags: [{ name: 'Operations', description: 'Version-independent operational endpoints.' }],
+    tags: [
+      { name: 'Movies', description: 'Movie listings, filters and details.' },
+      { name: 'Operations', description: 'Operational endpoints.' },
+    ],
   });
 }
 

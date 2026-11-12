@@ -1,9 +1,9 @@
 import { Validator } from '@seriousme/openapi-schema-validator';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { createApp } from '../src/app.js';
-import { createLogger } from '../src/logger.js';
-import { createTestApp, createTestVersions } from './helpers.js';
+import { API_BASE_PATH } from '../src/app.js';
+import { MovieListResponseSchema } from '../src/movies/schemas.js';
+import { createTestApp } from './helpers.js';
 
 describe('createApp', () => {
   it('constructs an Express application from injected dependencies', () => {
@@ -12,11 +12,59 @@ describe('createApp', () => {
     expect(typeof app.listen).toBe('function');
   });
 
-  it('rejects duplicate API version ids', () => {
-    const [v1] = createTestVersions();
-    expect(() => createApp({ logger: createLogger('silent'), versions: [v1!, v1!] })).toThrow(
-      /Duplicate API version/,
-    );
+  it('mounts the API under /api/v1', () => {
+    expect(API_BASE_PATH).toBe('/api/v1');
+  });
+});
+
+describe('API routes', () => {
+  const { app } = createTestApp();
+
+  it.each([
+    ['/api/v1/movies', 45430],
+    ['/api/v1/movies/year/1999', 723],
+    ['/api/v1/movies/genre/Action', 6590],
+    ['/api/v1/movies?year=1999&genre=Action', 100],
+    ['/api/v1/movies?year=1999&genre=28&sortOrder=desc', 100],
+  ])('serves the listing %s', async (url, totalItems) => {
+    const res = await request(app).get(url);
+    expect(res.status).toBe(200);
+    expect(res.body.pagination).toEqual({
+      page: 1,
+      pageSize: 50,
+      totalItems,
+      totalPages: Math.ceil(totalItems / 50),
+    });
+    expect(res.body.data).toHaveLength(50);
+  });
+
+  it('serves movie details at /api/v1/movies/:movieId', async () => {
+    const res = await request(app).get('/api/v1/movies/11');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ movieId: 11, title: 'Star Wars', averageRating: 3.69 });
+  });
+
+  it('reverses the default movieId order with sortOrder=desc', async () => {
+    const asc = await request(app).get('/api/v1/movies');
+    const desc = await request(app).get('/api/v1/movies?sortOrder=desc');
+    const ids = (body: unknown) =>
+      MovieListResponseSchema.parse(body).data.map((movie) => movie.movieId);
+    expect(ids(asc.body)).toEqual([...ids(asc.body)].sort((a, b) => a - b));
+    expect(ids(desc.body)).toEqual([...ids(desc.body)].sort((a, b) => b - a));
+  });
+
+  it.each(['/api/v2', '/api/v2/movies', '/api/v2/movies/11', '/api/v2/movies/year/1999'])(
+    'does not register a second API version: %s is 404',
+    async (url) => {
+      const res = await request(app).get(url);
+      expect(res.status).toBe(404);
+      expect(res.body.error.code).toBe('NOT_FOUND');
+    },
+  );
+
+  it('does not serve the movie routes outside /api/v1', async () => {
+    const res = await request(app).get('/movies');
+    expect(res.status).toBe(404);
   });
 });
 
@@ -54,37 +102,32 @@ describe('API documentation', () => {
     });
   });
 
-  it('documents only operations that exist (V1 movies; nothing under V2)', async () => {
+  it('documents exactly the implemented operations', async () => {
     const { app } = createTestApp();
     const res = await request(app).get('/openapi.json');
-    expect(Object.keys(res.body.paths as object)).toEqual([
-      '/health',
-      '/api/v1/movies',
-      '/api/v1/movies/year/{year}',
-      '/api/v1/movies/genre/{genre}',
-      '/api/v1/movies/{movieId}',
+    const paths = res.body.paths as Record<string, Record<string, { operationId?: string }>>;
+    const operations = Object.entries(paths).flatMap(([path, item]) =>
+      Object.entries(item).map(([method, op]) => [method, path, op.operationId]),
+    );
+    expect(operations).toEqual([
+      ['get', '/health', undefined],
+      ['get', '/api/v1/movies', 'listMovies'],
+      ['get', '/api/v1/movies/year/{year}', 'listMoviesByYear'],
+      ['get', '/api/v1/movies/genre/{genre}', 'listMoviesByGenre'],
+      ['get', '/api/v1/movies/{movieId}', 'getMovieDetails'],
     ]);
+    const tags = res.body.tags as { name: string }[];
+    expect(tags.map((t) => t.name)).toEqual(['Movies', 'Operations']);
   });
 
-  it('includes operations registered by an API version under its prefix', async () => {
-    const [v1, v2] = createTestVersions();
-    const { app } = createTestApp({
-      versions: [
-        {
-          ...v1!,
-          registerDocs: (registry, basePath) => {
-            registry.registerPath({
-              method: 'get',
-              path: `${basePath}/example`,
-              responses: { 204: { description: 'Test-only operation' } },
-            });
-          },
-        },
-        v2!,
-      ],
-    });
+  it('describes a single API version and keeps the rating-integrity warning', async () => {
+    const { app } = createTestApp();
     const res = await request(app).get('/openapi.json');
-    expect(Object.keys(res.body.paths as object)).toContain('/api/v1/example');
+    expect(res.text).not.toMatch(/v2|kaggle|rebuilt/i);
+    expect(res.body.info.description).toMatch(/may belong to a different movie/);
+    expect(res.body.paths['/api/v1/movies/{movieId}'].get.description).toMatch(
+      /ratings may belong to a different movie/,
+    );
   });
 
   it('serves Swagger UI at /docs', async () => {

@@ -9,7 +9,7 @@ export const HealthResponseSchema = z
 /**
  * Liveness only: answers 200 whenever the process can serve HTTP. It deliberately
  * does not touch databases or reveal configuration, so it stays cheap and safe to
- * expose and works before the V2 dataset exists.
+ * expose.
  */
 export function healthRouter(): Router {
   const router = Router();

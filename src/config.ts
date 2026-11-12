@@ -25,10 +25,8 @@ const configSchema = z.object({
   HOST: z.string().trim().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
-  V1_MOVIES_DB_PATH: dbPath('db/movies.db'),
-  V1_RATINGS_DB_PATH: dbPath('db/ratings.db'),
-  // V2's rebuilt dataset is produced in a later phase; existence is not checked here.
-  V2_DB_PATH: dbPath('data/v2/movies.db'),
+  MOVIES_DB_PATH: dbPath('db/movies.db'),
+  RATINGS_DB_PATH: dbPath('db/ratings.db'),
 });
 
 export type Config = z.infer<typeof configSchema>;

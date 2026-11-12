@@ -23,7 +23,6 @@ readonly COMPOSE_FILE="$AETNA_HOME/compose.production.yaml"
 readonly SMOKE_TEST="$AETNA_HOME/smoke-test.js"
 readonly CONTAINER=aetna-api
 readonly NETWORK=aetna-origin
-readonly DATASETS_LABEL=dev.budarz.aetna.datasets
 readonly REVISION_LABEL=org.opencontainers.image.revision
 
 # ---- logging -----------------------------------------------------------------
@@ -151,38 +150,10 @@ check_sqlite() { # path table
     { FAIL_REASON="$f has no rows in table $table"; return 1; }
 }
 
-# v2 contract (future): $AETNA_DATA_DIR/v2 holds movies.db, VERSION and
-# SHA256SUMS. The image declares the dataset version it was built against in the
-# label dev.budarz.aetna.dataset.v2; it must equal VERSION.
-check_v2() {
-  local dir=$AETNA_DATA_DIR/v2 want have
-  [[ -d $dir ]] || { FAIL_REASON="v2 dataset directory $dir is missing"; return 1; }
-  compose "$1" config --format json 2>/dev/null |
-    jq -e '.services.api.volumes[]? | select(.target == "/app/data/v2" and .read_only)' >/dev/null ||
-    { FAIL_REASON="read-only v2 mount is not enabled in $COMPOSE_FILE"; return 1; }
-  (cd "$dir" && sha256sum --quiet --strict -c SHA256SUMS) >/dev/null 2>&1 ||
-    { FAIL_REASON="v2 checksum verification failed ($dir/SHA256SUMS)"; return 1; }
-  want=$(image_label "$1" dev.budarz.aetna.dataset.v2)
-  have=$(cat "$dir/VERSION" 2>/dev/null || true)
-  [[ -n $want && $want == "$have" ]] ||
-    { FAIL_REASON="v2 dataset version '$have' does not match the image's required '$want'"; return 1; }
-  check_sqlite "$dir/movies.db" movies
-}
-
 preflight() { # digest
-  local digest=$1 datasets ds
-  datasets=$(image_label "$digest" "$DATASETS_LABEL")
-  datasets=${datasets:-v1} # images without the label predate v2 and need only v1
-  for ds in $datasets; do
-    case $ds in
-      v1)
-        check_sqlite "$AETNA_DATA_DIR/v1/movies.db" movies || return 1
-        check_sqlite "$AETNA_DATA_DIR/v1/ratings.db" ratings || return 1
-        ;;
-      v2) check_v2 "$digest" || return 1 ;;
-      *) FAIL_REASON="image requires unknown dataset '$ds'" && return 1 ;;
-    esac
-  done
+  local digest=$1
+  check_sqlite "$AETNA_DATA_DIR/v1/movies.db" movies || return 1
+  check_sqlite "$AETNA_DATA_DIR/v1/ratings.db" ratings || return 1
   docker network inspect "$NETWORK" >/dev/null 2>&1 ||
     { FAIL_REASON="docker network $NETWORK is missing (run install.sh)"; return 1; }
   compose "$digest" config --quiet 2>/dev/null ||

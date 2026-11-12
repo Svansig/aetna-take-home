@@ -1,9 +1,8 @@
 import { createServer } from 'node:http';
-import { createApp } from './app.js';
+import { createApp, createMoviesApi } from './app.js';
 import { ConfigError, loadConfig } from './config.js';
 import { openReadOnlyDatabase, type DatabaseSync } from './db/sqlite.js';
 import { createLogger } from './logger.js';
-import { createApiVersions } from './versions.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
@@ -33,9 +32,11 @@ function main(): void {
 
   // One read-only connection per database for the life of the process.
   const databases: { name: string; db: DatabaseSync }[] = [];
-  const closeDatabases = () => {
-    for (const { db } of databases.splice(0)) db.close();
-  };
+  const closeDatabases = (): string[] =>
+    databases.splice(0).map(({ name, db }) => {
+      db.close();
+      return name;
+    });
   const open = (name: string, path: string): DatabaseSync => {
     try {
       const db = openReadOnlyDatabase(path);
@@ -48,14 +49,11 @@ function main(): void {
       process.exit(1);
     }
   };
-  const v1MoviesDb = open('v1-movies', config.V1_MOVIES_DB_PATH);
-  const v1RatingsDb = open('v1-ratings', config.V1_RATINGS_DB_PATH);
+  const moviesDb = open('movies', config.MOVIES_DB_PATH);
+  const ratingsDb = open('ratings', config.RATINGS_DB_PATH);
   logger.info({ databases: databases.map((d) => d.name) }, 'Databases opened read-only');
 
-  const app = createApp({
-    logger,
-    versions: createApiVersions({ v1MoviesDb, v1RatingsDb }),
-  });
+  const app = createApp({ logger, apiRouter: createMoviesApi({ moviesDb, ratingsDb }) });
   const server = createServer(app);
 
   server.on('error', (err) => {
@@ -84,8 +82,7 @@ function main(): void {
     // Stops accepting new connections, closes idle keep-alive sockets and waits
     // for in-flight requests to finish; only then are the databases closed.
     server.close((err) => {
-      closeDatabases();
-      logger.info('Databases closed');
+      logger.info({ databases: closeDatabases() }, 'Databases closed');
       if (err) {
         logger.error({ err }, 'Error during shutdown');
         process.exit(1);

@@ -1,9 +1,9 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import {
-  V1_EMPTY_YEAR_EXAMPLE,
-  V1_FIRST_PAGE_EXAMPLE,
-  V1_YEAR_1999_EXAMPLES,
+  EMPTY_YEAR_EXAMPLE,
+  FIRST_PAGE_EXAMPLE,
+  YEAR_1999_EXAMPLES,
 } from '../../src/movies/routes.js';
 import {
   MovieListResponseSchema,
@@ -14,7 +14,7 @@ import {
 import {
   createFixtureMoviesDb,
   createTestApp,
-  createTestVersions,
+  createTestApiRouter,
   suppliedMoviesDb,
   usd,
 } from '../helpers.js';
@@ -189,10 +189,10 @@ describe('movies by year (supplied database)', () => {
   it('matches the documented examples', async () => {
     for (const sortOrder of ['asc', 'desc'] as const) {
       const body = await getList(STYLES.path('1999', `sortOrder=${sortOrder}`));
-      expect({ ...body, data: body.data.slice(0, 3) }).toEqual(V1_YEAR_1999_EXAMPLES[sortOrder]);
+      expect({ ...body, data: body.data.slice(0, 3) }).toEqual(YEAR_1999_EXAMPLES[sortOrder]);
     }
-    expect(await getList(STYLES.path(String(V1_EMPTY_YEAR_EXAMPLE.year)))).toEqual(
-      V1_EMPTY_YEAR_EXAMPLE.response,
+    expect(await getList(STYLES.path(String(EMPTY_YEAR_EXAMPLE.year)))).toEqual(
+      EMPTY_YEAR_EXAMPLE.response,
     );
   });
 
@@ -286,7 +286,7 @@ describe('existing endpoints are unchanged', () => {
   // (by movieId) on unfiltered listings too.
   it('keeps the unfiltered listing in movieId order, with sortOrder=desc reversing it', async () => {
     const plain = await getList('/api/v1/movies');
-    expect({ ...plain, data: plain.data.slice(0, 3) }).toEqual(V1_FIRST_PAGE_EXAMPLE);
+    expect({ ...plain, data: plain.data.slice(0, 3) }).toEqual(FIRST_PAGE_EXAMPLE);
     expect(await getList('/api/v1/movies?sortOrder=asc')).toEqual(plain);
     const last = await getList('/api/v1/movies?page=909&sortOrder=desc');
     expect(last.data.map((m) => m.imdbId).reverse()).toEqual(
@@ -321,7 +321,7 @@ describe('movies by year (fixtures)', () => {
     { movieId: 5, releaseDate: '9999-01-01' },
     { movieId: 6, releaseDate: '9999-12-31' },
   ]);
-  const fixtureApp = createTestApp({ versions: createTestVersions(db) }).app;
+  const fixtureApp = createTestApp({ apiRouter: createTestApiRouter(db) }).app;
   const ids = (body: MovieListResponse) => body.data.map((m) => m.movieId);
 
   it.each(Object.entries(STYLES))(
@@ -354,7 +354,7 @@ describe('movies by year (fixtures)', () => {
     const tied = createFixtureMoviesDb(
       Array.from({ length: 120 }, (_, i) => ({ movieId: 120 - i, releaseDate: '2001-09-09' })),
     );
-    const tiedApp = createTestApp({ versions: createTestVersions(tied) }).app;
+    const tiedApp = createTestApp({ apiRouter: createTestApiRouter(tied) }).app;
     const all = Array.from({ length: 120 }, (_, i) => i + 1);
     for (const [sortOrder, order] of [
       ['asc', all],
@@ -371,7 +371,7 @@ describe('movies by year (fixtures)', () => {
 
   it('turns a malformed row in the year into a generic 500, like the listing', async () => {
     const broken = createFixtureMoviesDb([{ movieId: 7, releaseDate: '1999-05-05', genres: '[' }]);
-    const res = await request(createTestApp({ versions: createTestVersions(broken) }).app).get(
+    const res = await request(createTestApp({ apiRouter: createTestApiRouter(broken) }).app).get(
       STYLES.path('1999'),
     );
     expect(res.status).toBe(500);

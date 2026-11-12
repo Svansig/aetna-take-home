@@ -13,7 +13,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['src/**/*.ts'],
-      // The process entry point is exercised by the smoke/Docker checks, not unit tests.
+      // The process entry point runs in a child process (test/server.test.ts), which
+      // V8 coverage doesn't instrument, and in the Docker smoke checks.
       exclude: ['src/server.ts'],
     },
   },

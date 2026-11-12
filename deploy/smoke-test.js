@@ -1,4 +1,4 @@
-// Functional smoke test for a running Movie Services API (V1 dataset).
+// Functional smoke test for a running Movie Services API (supplied datasets).
 //
 // Dependency-free: needs only Node.js >= 18 (global fetch). Used by
 //   - the publish workflow, against the freshly built image before it is pushed;

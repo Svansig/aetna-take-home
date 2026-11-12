@@ -7,7 +7,7 @@ can challenge any of them in one place.
 **Status key**
 
 - **Confirmed:** agreed with the product owner after implementation.
-- **Known issue:** a gap we accept in V1 and plan to fix.
+- **Known issue:** a limitation of the supplied data, documented rather than fixed.
 - **Assumed:** chosen by the implementer. It is consistent with the brief, but
   hasn't been confirmed.
 
@@ -65,31 +65,31 @@ omitted because every stored value is whole dollars, so they would always be `.0
   fixed in code so the server's locale never changes the output.
 - The value is a string, so clients can't do arithmetic with it directly. That
   is a consequence of formatting on the server.
-- Repositories keep the integer, and `MovieService` formats it. A future V2
-  repository gets the same format automatically.
+- The repository keeps the integer, and `MovieService` formats it.
 
-### 3. Joining ratings to movies — Known issue (fix planned for V2)
+### 3. Joining ratings to movies — Known issue
 
 "Ratings are pulled from the rating database." `movies.movieId` is a TMDB id and
 `ratings.movieId` is a MovieLens id. The supplied data contains no mapping
-between them (in the Kaggle source, it is `links_small.csv`).
+between them.
 
-V1 joins them by the raw number. Many averages therefore belong to a different
+The API joins them by the raw number. Many averages therefore belong to a different
 film: Star Wars (`movieId` 11) reports 3.69, MovieLens movie 11's average, while
 its real MovieLens id 260 averages 4.22. This is documented in the README and in
-the OpenAPI description. V2 will rebuild the data with the correct mapping.
+the OpenAPI description. Correct averages would need an authoritative
+TMDB-to-MovieLens identifier mapping, which the supplied data doesn't include.
 
 ### 4. Budget of 0 — Assumed
 
 36,550 movies (about 80%) store a budget of 0, which almost always means
-"not recorded." V1 can't tell that apart from a real zero, so it returns
+"not recorded." The API can't tell that apart from a real zero, so it returns
 `"$0"` as stored instead of guessing `null`.
 
 ### 5. Original language — Known issue
 
 The details story requires "original language." The only candidate column,
 `movies.language`, is empty for all 45,430 movies, so `originalLanguage` is
-always `null` in V1. V2 is planned to restore it from the Kaggle source.
+always `null`. Populating it would need additional data preparation.
 
 ### 6. Average rating format — Assumed
 
@@ -186,7 +186,7 @@ camelCase.
 
 ### 18. URL design — Assumed
 
-All endpoints are versioned under `/api/v1`:
+All endpoints live under the `/api/v1` prefix:
 
 - `GET /movies`
 - `GET /movies/{movieId}`
@@ -214,8 +214,6 @@ Both were measured and judged acceptable, so nothing is cached.
 These weren't requested. They're listed so it's clear they're additions, not
 interpretations of a requirement:
 
-- `/api/v2` is mounted with no operations (`404`), reserved for the corrected
-  dataset.
 - OpenAPI 3.1 at `/openapi.json` and Swagger UI at `/docs`.
 - `GET /health` liveness endpoint.
 - Docker image, GitHub Actions CI, publishing the image to GHCR, and a

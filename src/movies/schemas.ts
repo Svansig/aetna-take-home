@@ -34,7 +34,7 @@ const summaryRecordShape = {
     }),
   imdbId: z.string().meta({
     description:
-      'IMDb identifier, e.g. `tt0113101`. V1 returns the stored value as-is. A few ' +
+      'IMDb identifier, e.g. `tt0113101`, returned as stored. A few ' +
       'source records have an empty string here.',
     example: 'tt0113101',
   }),
@@ -224,13 +224,13 @@ const detailRecordShape = {
     .nullable()
     .meta({
       description:
-        'Original language as stored. Always `null` in V1, because the supplied database ' +
-        'has no language values.',
+        'Original language as stored. Always `null`, because the supplied database has no ' +
+        'language values.',
       example: null,
     }),
   productionCompanies: z.array(ProductionCompanySchema).meta({
     description:
-      'May be empty. In V1, the 483 source records whose company data is malformed JSON ' +
+      'May be empty. The 483 source records whose company data is malformed JSON ' +
       'return `[]` instead of failing the request.',
   }),
 };
@@ -254,8 +254,8 @@ export const MovieDetailsSchema = MovieSummarySchema.extend({
     .meta({
       description:
         'Mean user rating on a 0.5–5.0 scale, rounded to 2 decimal places. `null` when no ' +
-        'ratings match. **V1 caveat:** ratings are matched by numeric movie id across ' +
-        'databases that use different id systems (TMDB vs MovieLens), so V1 averages may ' +
+        'ratings match. **Caveat:** ratings are matched by numeric movie id across ' +
+        'databases that use different id systems (TMDB vs MovieLens), so averages may ' +
         'belong to a different movie.',
       example: 3.69,
     }),

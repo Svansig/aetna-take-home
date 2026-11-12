@@ -40,7 +40,7 @@ publication are described in the [README](../README.md#continuous-integration).
 7. [First deployment and acceptance](#7-first-deployment-and-acceptance)
 8. [Automatic updates](#8-automatic-updates)
 9. [Day-2 operations](#9-day-2-operations)
-10. [Replacing datasets and V2](#10-replacing-datasets-and-v2)
+10. [Replacing datasets](#10-replacing-datasets)
 11. [Known limitations](#11-known-limitations)
 12. [Test evidence](#12-test-evidence)
 
@@ -74,7 +74,7 @@ pct enter 240
 
 - **Architecture:** `amd64`. The image is published for `linux/amd64` only.
 - **Storage:** 16 GB holds the OS, Docker images (~250 MB each; old ones are
-  pruned, see [9](#9-day-2-operations)) and the ~32 MB V1 datasets. LVM-thin or
+  pruned, see [9](#9-day-2-operations)) and the ~32 MB datasets. LVM-thin or
   directory storage with ext4/xfs works with Docker's overlayfs. ZFS-backed root
   filesystems need OpenZFS ≥ 2.2 (Proxmox VE ≥ 8.1) for overlayfs.
 - **Network:** outbound DNS and HTTPS (443) to `ghcr.io`, `pkg-containers.githubusercontent.com`,
@@ -147,8 +147,7 @@ Host layout:
 | `/opt/aetna/bin/aetna-public-check`           | root 0755                      | Public-route monitor                                                                                      |
 | `/etc/aetna/aetna.env`                        | root 0644                      | Configuration, no secrets ([example](../deploy/aetna.env.example))                                        |
 | `/etc/aetna/tunnel-token`                     | 65532:65532 0400               | Cloudflare Tunnel token (secret)                                                                          |
-| `/srv/aetna/data/v1/{movies,ratings}.db`      | root 0444, directory root 0755 | V1 datasets, mounted read-only                                                                            |
-| `/srv/aetna/data/v2/`                         | root                           | Future V2 dataset (see [10](#10-replacing-datasets-and-v2))                                               |
+| `/srv/aetna/data/v1/{movies,ratings}.db`      | root 0444, directory root 0755 | Supplied datasets, mounted read-only                                                                      |
 | `/var/lib/aetna/`                             | root 0700                      | Updater state: `current.digest`, `previous.digest`, `rollback.digest`, `blocked/`, `hold`, `releases.log` |
 | `/etc/systemd/system/aetna-*.{service,timer}` | root 0644                      | [Units](../deploy/systemd/)                                                                               |
 
@@ -278,10 +277,9 @@ after each run starts. Every run:
    deployment), or if it's in `blocked/` (failed before).
 5. Pulls the candidate by digest. A pull failure changes nothing and is retried
    next minute.
-6. **Preflight**, with the running container untouched: required datasets (from
-   the image label `dev.budarz.aetna.datasets`, default `v1`) are present and
-   valid, the `aetna-origin` network exists, and the Compose configuration
-   renders. A failure here blocks the candidate.
+6. **Preflight**, with the running container untouched: `movies.db` and
+   `ratings.db` are present, readable and pass `quick_check`, the `aetna-origin`
+   network exists, and the Compose configuration renders. A failure here blocks the candidate.
 7. Saves the rollback target to `rollback.digest`, then recreates only the `api`
    service of project `aetna-api` with the candidate digest (`--no-deps --pull never`).
 8. Waits up to `AETNA_HEALTH_TIMEOUT` (120 s) for Docker health `healthy`, failing
@@ -386,12 +384,12 @@ To upgrade cloudflared, change the pinned tag and digest in
 `deploy/compose.tunnel.yaml`, `git pull`, run `install.sh`, then run
 `docker compose -f /opt/aetna/compose.tunnel.yaml up -d`.
 
-## 10. Replacing datasets and V2
+## 10. Replacing datasets
 
 Datasets are **not** part of image releases and are never changed by
 `aetna-update`. Rollback restores the image, not the data.
 
-**Replacing a V1 file** (for example, restoring a corrupted copy) is a planned
+**Replacing a database file** (for example, restoring a corrupted copy) is a planned
 operator action with brief downtime:
 
 ```sh
@@ -408,22 +406,6 @@ pointing at the old inode after a rename. The retry recreates the container,
 which then sees the new file. Keep the previous file until the new one is
 verified.
 
-**V2** (not implemented yet) uses a separately versioned dataset directory,
-coordinated with the application version that needs it:
-
-- Provision `/srv/aetna/data/v2/` with `movies.db`, a `VERSION` file (for example
-  `2025-01-r1`) and `SHA256SUMS`, **before** the V2 release is merged.
-- The V2 release declares what it needs in its Dockerfile:
-  `LABEL dev.budarz.aetna.datasets="v1 v2" dev.budarz.aetna.dataset.v2="2025-01-r1"`.
-- Enable the commented read-only `/app/data/v2` mount in
-  `deploy/compose.production.yaml`, then `git pull && install.sh`.
-- The updater then refuses to deploy that release (preflight failure, running
-  release untouched) unless the v2 directory exists, the mount is enabled and
-  read-only, `sha256sum -c SHA256SUMS` passes, `VERSION` matches the image label,
-  and `movies.db` passes `quick_check` and has rows.
-
-Images without the label are V1-only, so existing releases are unaffected.
-
 ## 11. Known limitations
 
 - **Brief downtime on every deployment and rollback** (single replica, stop then
@@ -431,7 +413,7 @@ Images without the label are V1-only, so existing releases are unaffected.
   healthy (about 5–15 s in local tests). Accepted by design.
 - **Detection latency** is up to ~60 s after the `production` tag moves, plus
   pull and verification time.
-- **Smoke tests are V1-data-specific** (for example, movie 11 must be Star Wars).
+- **Smoke tests are data-specific** (for example, movie 11 must be Star Wars).
   A release that intentionally changes those responses must update
   `deploy/smoke-test.js` in the same change. The host runs its installed copy
   (`/opt/aetna/smoke-test.js`), so re-run `install.sh` when the smoke test changes.

@@ -12,17 +12,14 @@ services:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # Paths inside the container. Override only if the mounts below change.
-      V1_MOVIES_DB_PATH: /app/db/movies.db
-      V1_RATINGS_DB_PATH: /app/db/ratings.db
-      V2_DB_PATH: /app/data/v2/movies.db
+      MOVIES_DB_PATH: /app/db/movies.db
+      RATINGS_DB_PATH: /app/db/ratings.db
     ports:
       - '127.0.0.1:${HOST_PORT:-3000}:3000'
     volumes:
       # Supplied databases, read-only.
       - ./db/movies.db:/app/db/movies.db:ro
       - ./db/ratings.db:/app/db/ratings.db:ro
-      # Future phase: rebuilt V2 dataset, also read-only.
-      # - ./data/v2:/app/data/v2:ro
     read_only: true
     cap_drop: [ALL]
     security_opt:

@@ -2,7 +2,6 @@ import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { Router } from 'express';
 import { ErrorResponseSchema } from '../http/errors.js';
 import { PAGE_SIZE } from '../http/pagination.js';
-import type { ApiVersionId } from '../versions.js';
 import {
   MovieDetailsSchema,
   MovieIdParamsSchema,
@@ -17,7 +16,7 @@ import {
 } from './schemas.js';
 import type { MovieService } from './service.js';
 
-/** Movie routes, shared by every API version; only the injected service differs. */
+/** Movie routes over an injected `MovieService`. */
 export function createMoviesRouter(service: MovieService): Router {
   const router = Router();
 
@@ -56,10 +55,10 @@ export function createMoviesRouter(service: MovieService): Router {
 }
 
 /**
- * The first three movies of page 1 in the supplied V1 database, verbatim. A test
+ * The first three movies of page 1 in the supplied database, verbatim. A test
  * checks them against the database so the documentation can't drift.
  */
-export const V1_FIRST_PAGE_EXAMPLE: MovieListResponse = {
+export const FIRST_PAGE_EXAMPLE: MovieListResponse = {
   data: [
     {
       movieId: 2,
@@ -100,10 +99,10 @@ export const V1_FIRST_PAGE_EXAMPLE: MovieListResponse = {
 
 /**
  * The first three movies of 1999 (page 1 of 15) in each direction, verbatim from
- * the supplied V1 database. A test checks them against the database. 67 movies of
+ * the supplied database. A test checks them against the database. 67 movies of
  * 1999 share the date 1999-01-01, so ascending order shows the movieId tie-break.
  */
-export const V1_YEAR_1999_EXAMPLES = {
+export const YEAR_1999_EXAMPLES = {
   asc: {
     data: [
       {
@@ -178,8 +177,8 @@ export const V1_YEAR_1999_EXAMPLES = {
   },
 } satisfies Record<'asc' | 'desc', MovieListResponse>;
 
-/** A valid year with no movies in the supplied V1 database (checked by a test). */
-export const V1_EMPTY_YEAR_EXAMPLE = {
+/** A valid year with no movies in the supplied database (checked by a test). */
+export const EMPTY_YEAR_EXAMPLE = {
   year: 1850,
   response: {
     data: [],
@@ -188,10 +187,10 @@ export const V1_EMPTY_YEAR_EXAMPLE = {
 } satisfies { year: number; response: MovieListResponse };
 
 /**
- * Genre and combined-filter pages from the supplied V1 database, verbatim (first
+ * Genre and combined-filter pages from the supplied database, verbatim (first
  * three movies of page 1). A test checks them against the database.
  */
-export const V1_GENRE_EXAMPLES = {
+export const GENRE_EXAMPLES = {
   action: {
     data: [
       {
@@ -280,12 +279,12 @@ export const V1_GENRE_EXAMPLES = {
 } satisfies Record<string, MovieListResponse>;
 
 /**
- * Real V1 detail responses, verbatim. A test checks them against the supplied
+ * Real detail responses, verbatim. A test checks them against the supplied
  * databases. Star Wars shows the naive rating association: 3.69 comes from
  * MovieLens movie 11, while Star Wars' real MovieLens id 260 averages 4.22.
  * Capote shows both a `null` rating and the malformed-company fallback.
  */
-export const V1_DETAILS_EXAMPLES = {
+export const DETAILS_EXAMPLES = {
   11: {
     movieId: 11,
     imdbId: 'tt0076759',
@@ -329,12 +328,10 @@ export const V1_DETAILS_EXAMPLES = {
   },
 } satisfies Record<number, MovieDetails>;
 
-export function registerMoviesDocs(
-  registry: OpenAPIRegistry,
-  { basePath, version }: { basePath: string; version: ApiVersionId },
-): void {
-  const totals = V1_FIRST_PAGE_EXAMPLE.pagination;
-  const tag = `Movies (${version})`;
+/** Register every `/movies` operation under `basePath` (e.g. `/api/v1`). */
+export function registerMoviesDocs(registry: OpenAPIRegistry, basePath: string): void {
+  const totals = FIRST_PAGE_EXAMPLE.pagination;
+  const tag = 'Movies';
   const validationError = (path: string, message: string) => ({
     error: {
       code: 'VALIDATION_ERROR',
@@ -353,21 +350,21 @@ export function registerMoviesDocs(
   const yearExamples = {
     year1999: {
       summary: '1999, ascending (default): first 3 of 50 movies on page 1',
-      value: V1_YEAR_1999_EXAMPLES.asc,
+      value: YEAR_1999_EXAMPLES.asc,
     },
     year1999Desc: {
       summary: '1999, sortOrder=desc: first 3 of 50 movies on page 1',
-      value: V1_YEAR_1999_EXAMPLES.desc,
+      value: YEAR_1999_EXAMPLES.desc,
     },
     emptyYear: {
-      summary: `${String(V1_EMPTY_YEAR_EXAMPLE.year)}: a valid year with no movies`,
-      value: V1_EMPTY_YEAR_EXAMPLE.response,
+      summary: `${String(EMPTY_YEAR_EXAMPLE.year)}: a valid year with no movies`,
+      value: EMPTY_YEAR_EXAMPLE.response,
     },
   };
   const genreExample = {
     action: {
       summary: 'Action (or 28, or action): first 3 of 50 movies on page 1, by movieId',
-      value: V1_GENRE_EXAMPLES.action,
+      value: GENRE_EXAMPLES.action,
     },
   };
   const unknownGenre = {
@@ -426,7 +423,7 @@ export function registerMoviesDocs(
   registry.registerPath({
     method: 'get',
     path: `${basePath}/movies`,
-    operationId: `listMovies${version.toUpperCase()}`,
+    operationId: 'listMovies',
     tags: [tag],
     summary: 'List movies, optionally filtered by year and/or genre',
     description: [
@@ -458,7 +455,7 @@ export function registerMoviesDocs(
             examples: {
               firstPage: {
                 summary: 'No filters, page 1 (first 3 of 50 movies)',
-                value: V1_FIRST_PAGE_EXAMPLE,
+                value: FIRST_PAGE_EXAMPLE,
               },
               pastTheEnd: {
                 summary: 'A page past the end',
@@ -468,7 +465,7 @@ export function registerMoviesDocs(
               ...genreExample,
               action1999: {
                 summary: 'year=1999&genre=Action: first 3 of 50 movies on page 1',
-                value: V1_GENRE_EXAMPLES.action1999,
+                value: GENRE_EXAMPLES.action1999,
               },
             },
           },
@@ -488,7 +485,7 @@ export function registerMoviesDocs(
   registry.registerPath({
     method: 'get',
     path: `${basePath}/movies/year/{year}`,
-    operationId: `listMoviesByYear${version.toUpperCase()}`,
+    operationId: 'listMoviesByYear',
     tags: [tag],
     summary: 'List movies released in a year',
     description: [
@@ -516,7 +513,7 @@ export function registerMoviesDocs(
   registry.registerPath({
     method: 'get',
     path: `${basePath}/movies/genre/{genre}`,
-    operationId: `listMoviesByGenre${version.toUpperCase()}`,
+    operationId: 'listMoviesByGenre',
     tags: [tag],
     summary: 'List movies in a genre',
     description: [
@@ -547,7 +544,7 @@ export function registerMoviesDocs(
   registry.registerPath({
     method: 'get',
     path: `${basePath}/movies/{movieId}`,
-    operationId: `getMovieDetails${version.toUpperCase()}`,
+    operationId: 'getMovieDetails',
     tags: [tag],
     summary: 'Get movie details',
     description: [
@@ -560,18 +557,18 @@ export function registerMoviesDocs(
       '* `averageRating` is the mean of matching ratings on a 0.5–5.0 scale, rounded to 2',
       '  decimal places. It is `null` (never `0`) when no ratings match.',
       '* `description`, `releaseDate` and `originalLanguage` are `null` when the source',
-      '  value is empty. `originalLanguage` is always `null` in V1, because the supplied',
+      '  value is empty. `originalLanguage` is always `null`, because the supplied',
       '  database has no language values.',
-      '* `productionCompanies` is `[]` for the 483 V1 records whose company data is',
+      '* `productionCompanies` is `[]` for the 483 records whose company data is',
       '  malformed JSON. The request still succeeds and no repair is attempted.',
       '',
-      '**Known V1 limitation: ratings may belong to a different movie.** The movies',
-      'database uses TMDB ids and the ratings database uses MovieLens ids. V1',
+      '**Known limitation: ratings may belong to a different movie.** The movies',
+      'database uses TMDB ids and the ratings database uses MovieLens ids. The API',
       'deliberately joins them by the raw number (`movies.movieId = ratings.movieId`),',
       'so many averages come from an unrelated film. For example, Star Wars',
       "(`movieId` 11) reports 3.69, the average for MovieLens movie 11. Star Wars' real",
-      'MovieLens id is 260, which averages 4.22. A corrected mapping is planned for V2',
-      'and is not implemented.',
+      'MovieLens id is 260, which averages 4.22. Correct averages would need an',
+      'authoritative TMDB-to-MovieLens id mapping, which the supplied data lacks.',
     ].join('\n'),
     request: { params: MovieIdParamsSchema },
     responses: {
@@ -582,12 +579,12 @@ export function registerMoviesDocs(
             schema: MovieDetailsSchema,
             examples: {
               starWars: {
-                summary: 'movieId 11: Star Wars (naive V1 rating: 3.69, not 4.22)',
-                value: V1_DETAILS_EXAMPLES[11],
+                summary: 'movieId 11: Star Wars (naive rating: 3.69, not 4.22)',
+                value: DETAILS_EXAMPLES[11],
               },
               capote: {
                 summary: 'movieId 398: Capote (no matching ratings; malformed company JSON)',
-                value: V1_DETAILS_EXAMPLES[398],
+                value: DETAILS_EXAMPLES[398],
               },
             },
           },
