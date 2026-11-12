@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for a new approved Movie Services API release every 60 seconds
+Documentation=https://github.com/Svansig/aetna-take-home/blob/main/docs/DEPLOYMENT.md
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=60s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the public Movie Services API route through Cloudflare (monitoring only)
+Documentation=https://github.com/Svansig/aetna-take-home/blob/main/docs/DEPLOYMENT.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/aetna/bin/aetna-public-check
+SyslogIdentifier=aetna-public-check
+TimeoutStartSec=2min
+NoNewPrivileges=yes
+PrivateTmp=yes

@@ -1,0 +1,71 @@
+# Production API service, managed by the host updater (deploy/bin/aetna-update).
+#
+# Not for local development: use the repository's compose.yaml for that.
+# The image is pulled from GHCR and identified by an immutable digest that the
+# updater supplies in API_IMAGE; it is never built here. Settings come from
+# /etc/aetna/aetna.env (see deploy/aetna.env.example).
+#
+# The container publishes no ports. It is reachable only on the internal
+# `aetna-origin` network (as http://aetna-api:3000), which it shares with the
+# cloudflared connector from compose.tunnel.yaml, a separate Compose project so
+# replacing the API never restarts the tunnel.
+name: aetna-api
+
+services:
+  api:
+    image: ${API_IMAGE:?API_IMAGE must be set to ghcr.io/...@sha256:<digest>}
+    container_name: aetna-api
+    init: true # tini as PID 1: forwards signals, reaps zombies
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${AETNA_LOG_LEVEL:-info}
+      # Paths inside the container (same as the image defaults and compose.yaml).
+      V1_MOVIES_DB_PATH: /app/db/movies.db
+      V1_RATINGS_DB_PATH: /app/db/ratings.db
+      V2_DB_PATH: /app/data/v2/movies.db
+    volumes:
+      # V1 datasets, provisioned on the host independently of image releases.
+      # create_host_path: false makes a missing file an error instead of an
+      # empty directory silently created by Docker.
+      - type: bind
+        source: ${AETNA_DATA_DIR:?AETNA_DATA_DIR must be set}/v1/movies.db
+        target: /app/db/movies.db
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${AETNA_DATA_DIR}/v1/ratings.db
+        target: /app/db/ratings.db
+        read_only: true
+        bind: { create_host_path: false }
+      # V2 (future): uncomment when a release requires the v2 dataset; the
+      # updater validates it before deploying such a release (see docs/DEPLOYMENT.md).
+      # - type: bind
+      #   source: ${AETNA_DATA_DIR}/v2
+      #   target: /app/data/v2
+      #   read_only: true
+      #   bind: { create_host_path: false }
+    # Same hardening as compose.yaml. The image runs as the non-root `node` user.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Keep the image's health check command, interval, timeout and retries; only
+    # probe every 2 s during the (image-default) 10 s start period so the updater
+    # doesn't wait a full 30 s interval for the first result.
+    healthcheck:
+      start_period: 10s
+      start_interval: 2s
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '5' }
+    networks:
+      origin:
+        aliases: [aetna-api]
+
+networks:
+  origin:
+    # Created once by deploy/install.sh: docker network create --internal aetna-origin
+    # Internal: no route to the outside, and no ports can be published on it.
+    name: aetna-origin
+    external: true

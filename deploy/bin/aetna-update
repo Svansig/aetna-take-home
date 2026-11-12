@@ -1,0 +1,396 @@
+#!/usr/bin/env bash
+# aetna-update: pull-based release updater for the Movie Services API.
+#
+# Run every 60 s by aetna-update.timer (`aetna-update check`). It resolves the
+# approved release tag (default `production`) on GHCR to a digest and, if that
+# digest differs from the last successfully deployed one:
+#   pull -> validate datasets and config -> record previous -> replace container
+#   -> wait for health -> smoke test -> record success
+# On any verification failure it blocks the candidate digest (so it isn't retried
+# every minute), restores the previous known-good digest and verifies it.
+#
+# Usage: aetna-update [check|status|retry [sha256:…]|rollback|deploy sha256:…|pause|resume]
+# See docs/DEPLOYMENT.md.
+set -Eeuo pipefail
+umask 022
+
+readonly CONFIG_FILE=${AETNA_CONFIG:-/etc/aetna/aetna.env}
+readonly AETNA_HOME=${AETNA_HOME:-/opt/aetna}
+readonly STATE_DIR=${AETNA_STATE_DIR:-/var/lib/aetna}
+readonly LOCK_FILE=${AETNA_LOCK_FILE:-/run/lock/aetna-update.lock}
+readonly REGISTRY_SCHEME=${AETNA_REGISTRY_SCHEME:-https} # http only for local tests
+readonly COMPOSE_FILE="$AETNA_HOME/compose.production.yaml"
+readonly SMOKE_TEST="$AETNA_HOME/smoke-test.js"
+readonly CONTAINER=aetna-api
+readonly NETWORK=aetna-origin
+readonly DATASETS_LABEL=dev.budarz.aetna.datasets
+readonly REVISION_LABEL=org.opencontainers.image.revision
+
+# ---- logging -----------------------------------------------------------------
+# Under systemd, "<N>" prefixes set the journal priority (journalctl -p err).
+log() {
+  local prio=$1
+  shift
+  local -A num=([crit]=2 [err]=3 [warning]=4 [notice]=5 [info]=6)
+  if [[ -n ${JOURNAL_STREAM:-} ]]; then
+    printf '<%s>%s\n' "${num[$prio]}" "$*"
+  else
+    printf '%s %-7s %s\n' "$(date -u +%FT%TZ)" "$prio" "$*" >&2
+  fi
+}
+die() {
+  log err "$*"
+  exit 1
+}
+
+# ---- configuration -------------------------------------------------------------
+load_config() {
+  [[ -r $CONFIG_FILE ]] || die "config file $CONFIG_FILE is missing or unreadable"
+  local line key value
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+    [[ $line =~ ^([A-Z_][A-Z0-9_]*)=(.*)$ ]] || die "invalid line in $CONFIG_FILE: $line"
+    key=${BASH_REMATCH[1]} value=${BASH_REMATCH[2]}
+    case $key in
+      AETNA_IMAGE_REPO | AETNA_RELEASE_TAG | AETNA_DATA_DIR | AETNA_LOG_LEVEL | \
+        AETNA_HEALTH_TIMEOUT | AETNA_PUBLIC_URL) printf -v "$key" '%s' "$value" ;;
+      *) die "unknown setting $key in $CONFIG_FILE" ;;
+    esac
+  done <"$CONFIG_FILE"
+  : "${AETNA_IMAGE_REPO:?AETNA_IMAGE_REPO not set}" "${AETNA_DATA_DIR:?AETNA_DATA_DIR not set}"
+  AETNA_RELEASE_TAG=${AETNA_RELEASE_TAG:-production}
+  AETNA_HEALTH_TIMEOUT=${AETNA_HEALTH_TIMEOUT:-120}
+  [[ $AETNA_IMAGE_REPO =~ ^[a-z0-9.:-]+(/[a-z0-9._-]+)+$ ]] || die "AETNA_IMAGE_REPO is malformed"
+  [[ $AETNA_RELEASE_TAG =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || die "AETNA_RELEASE_TAG is malformed"
+  [[ $AETNA_HEALTH_TIMEOUT =~ ^[0-9]+$ ]] || die "AETNA_HEALTH_TIMEOUT must be a number"
+}
+
+valid_digest() { [[ $1 =~ ^sha256:[0-9a-f]{64}$ ]]; }
+ref_of() { printf '%s@%s' "$AETNA_IMAGE_REPO" "$1"; }
+short() { printf '%s' "${1:7:12}"; }
+
+# ---- state ---------------------------------------------------------------------
+# current.digest   last successfully deployed (known-good) digest
+# previous.digest  the known-good digest before that (for `aetna-update rollback`)
+# rollback.digest  saved before each deployment: what a failed candidate reverts to
+# blocked/<hex>    digests that failed verification; skipped until retried
+# hold             automatic updates paused (manual deploy)
+# releases.log     one line per deployment outcome
+read_state() { [[ -s $STATE_DIR/$1 ]] && cat "$STATE_DIR/$1" || true; }
+write_state() {
+  local tmp
+  tmp=$(mktemp "$STATE_DIR/.$1.XXXXXX")
+  printf '%s\n' "$2" >"$tmp"
+  mv -f "$tmp" "$STATE_DIR/$1"
+}
+blocked_file() { printf '%s/blocked/%s' "$STATE_DIR" "${1#sha256:}"; }
+block() {
+  printf 'digest=%s\ntime=%s\nreason=%s\n' "$1" "$(date -u +%FT%TZ)" "$2" >"$(blocked_file "$1")"
+  log warning "blocked candidate=$1; it will not be retried until a new release is published or an operator runs 'aetna-update retry $1'"
+}
+record() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$STATE_DIR/releases.log"; }
+
+# ---- registry ------------------------------------------------------------------
+readonly MANIFEST_TYPES='application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json'
+
+# Resolve REPO:TAG to the registry's manifest digest without downloading layers.
+# Anonymous: follows the Bearer challenge for a pull-only token (public package).
+resolve_digest() {
+  local registry=${AETNA_IMAGE_REPO%%/*} path=${AETNA_IMAGE_REPO#*/}
+  local url="$REGISTRY_SCHEME://$registry/v2/$path/manifests/$AETNA_RELEASE_TAG"
+  local headers auth=() challenge realm service scope token digest
+  headers=$(curl -sS -I --max-time 20 -H "Accept: $MANIFEST_TYPES" "$url") ||
+    { log err "registry request failed: $url"; return 1; }
+  if [[ $(head -n1 <<<"$headers") == *" 401"* ]]; then
+    challenge=$(grep -i '^www-authenticate:' <<<"$headers" | tr -d '\r') || true
+    realm=$(sed -n 's/.*realm="\([^"]*\)".*/\1/p' <<<"$challenge")
+    service=$(sed -n 's/.*service="\([^"]*\)".*/\1/p' <<<"$challenge")
+    scope=$(sed -n 's/.*scope="\([^"]*\)".*/\1/p' <<<"$challenge")
+    [[ $realm == https://* ]] || { log err "unexpected registry auth challenge: $challenge"; return 1; }
+    token=$(curl -fsS --max-time 20 --get --data-urlencode "service=$service" \
+      --data-urlencode "scope=$scope" "$realm" | jq -r '.token // .access_token // empty') ||
+      { log err "cannot obtain an anonymous pull token (is the GHCR package public?)"; return 1; }
+    [[ -n $token ]] || { log err "registry returned an empty token"; return 1; }
+    auth=(-H "Authorization: Bearer $token")
+    headers=$(curl -sS -I --max-time 20 -H "Accept: $MANIFEST_TYPES" "${auth[@]}" "$url") ||
+      { log err "registry request failed: $url"; return 1; }
+  fi
+  if [[ $(head -n1 <<<"$headers") != *" 200"* ]]; then
+    log err "cannot resolve $AETNA_IMAGE_REPO:$AETNA_RELEASE_TAG: $(head -n1 <<<"$headers" | tr -d '\r')"
+    return 1
+  fi
+  digest=$(grep -i '^docker-content-digest:' <<<"$headers" | awk '{print $2}' | tr -d '\r')
+  valid_digest "$digest" || { log err "registry returned no valid digest"; return 1; }
+  printf '%s\n' "$digest"
+}
+
+ensure_image() {
+  local ref
+  ref=$(ref_of "$1")
+  docker image inspect "$ref" >/dev/null 2>&1 && return 0
+  docker pull --quiet "$ref" >/dev/null
+}
+
+image_label() {
+  { docker image inspect --format "{{ index .Config.Labels \"$2\" }}" "$(ref_of "$1")" 2>/dev/null ||
+    true; } | sed 's/^<no value>$//'
+}
+
+# ---- preflight validation ------------------------------------------------------
+FAIL_REASON=""
+
+check_sqlite() { # path table
+  local f=$1 table=$2 mode
+  [[ -f $f ]] || { FAIL_REASON="missing database $f"; return 1; }
+  [[ -s $f ]] || { FAIL_REASON="empty database $f"; return 1; }
+  mode=$(stat -c %a "$f")
+  ((8#$mode & 8#004)) || { FAIL_REASON="$f is not world-readable (container runs as uid 1000)"; return 1; }
+  [[ $(sqlite3 -readonly -bail "$f" 'PRAGMA quick_check;' 2>&1) == ok ]] ||
+    { FAIL_REASON="integrity check failed for $f"; return 1; }
+  [[ $(sqlite3 -readonly -bail "$f" "SELECT count(*) > 0 FROM \"$table\";" 2>&1) == 1 ]] ||
+    { FAIL_REASON="$f has no rows in table $table"; return 1; }
+}
+
+# v2 contract (future): $AETNA_DATA_DIR/v2 holds movies.db, VERSION and
+# SHA256SUMS. The image declares the dataset version it was built against in the
+# label dev.budarz.aetna.dataset.v2; it must equal VERSION.
+check_v2() {
+  local dir=$AETNA_DATA_DIR/v2 want have
+  [[ -d $dir ]] || { FAIL_REASON="v2 dataset directory $dir is missing"; return 1; }
+  compose "$1" config --format json 2>/dev/null |
+    jq -e '.services.api.volumes[]? | select(.target == "/app/data/v2" and .read_only)' >/dev/null ||
+    { FAIL_REASON="read-only v2 mount is not enabled in $COMPOSE_FILE"; return 1; }
+  (cd "$dir" && sha256sum --quiet --strict -c SHA256SUMS) >/dev/null 2>&1 ||
+    { FAIL_REASON="v2 checksum verification failed ($dir/SHA256SUMS)"; return 1; }
+  want=$(image_label "$1" dev.budarz.aetna.dataset.v2)
+  have=$(cat "$dir/VERSION" 2>/dev/null || true)
+  [[ -n $want && $want == "$have" ]] ||
+    { FAIL_REASON="v2 dataset version '$have' does not match the image's required '$want'"; return 1; }
+  check_sqlite "$dir/movies.db" movies
+}
+
+preflight() { # digest
+  local digest=$1 datasets ds
+  datasets=$(image_label "$digest" "$DATASETS_LABEL")
+  datasets=${datasets:-v1} # images without the label predate v2 and need only v1
+  for ds in $datasets; do
+    case $ds in
+      v1)
+        check_sqlite "$AETNA_DATA_DIR/v1/movies.db" movies || return 1
+        check_sqlite "$AETNA_DATA_DIR/v1/ratings.db" ratings || return 1
+        ;;
+      v2) check_v2 "$digest" || return 1 ;;
+      *) FAIL_REASON="image requires unknown dataset '$ds'" && return 1 ;;
+    esac
+  done
+  docker network inspect "$NETWORK" >/dev/null 2>&1 ||
+    { FAIL_REASON="docker network $NETWORK is missing (run install.sh)"; return 1; }
+  compose "$digest" config --quiet 2>/dev/null ||
+    { FAIL_REASON="compose configuration is invalid for this release"; return 1; }
+}
+
+# ---- deployment ----------------------------------------------------------------
+compose() { # digest, compose args...
+  local digest=$1
+  shift
+  API_IMAGE=$(ref_of "$digest") docker compose \
+    --project-directory "$AETNA_HOME" -f "$COMPOSE_FILE" --env-file "$CONFIG_FILE" "$@"
+}
+
+wait_healthy() {
+  local deadline=$((SECONDS + AETNA_HEALTH_TIMEOUT)) state
+  while ((SECONDS < deadline)); do
+    state=$(docker inspect --format \
+      '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} {{.RestartCount}}' \
+      "$CONTAINER" 2>/dev/null) || state="missing none 0"
+    case $state in
+      "running healthy 0") return 0 ;;
+      running\ none\ *) FAIL_REASON="container has no health check" && return 1 ;;
+      *\ unhealthy\ *) FAIL_REASON="container became unhealthy" && return 1 ;;
+      exited\ * | dead\ * | missing\ *) FAIL_REASON="container is ${state%% *}" && return 1 ;;
+      *\ [1-9]*) FAIL_REASON="container restarted (crash loop)" && return 1 ;;
+    esac
+    sleep 2
+  done
+  FAIL_REASON="container not healthy after ${AETNA_HEALTH_TIMEOUT}s (last state: $state)"
+  return 1
+}
+
+# Replace the API container with DIGEST and verify it. Sets FAIL_REASON on failure.
+start_and_verify() {
+  local digest=$1 running out
+  FAIL_REASON=""
+  if ! out=$(compose "$digest" up --detach --no-deps --pull never --force-recreate api 2>&1); then
+    FAIL_REASON="docker compose up failed: $(tail -n1 <<<"$out")"
+    return 1
+  fi
+  wait_healthy || return 1
+  running=$(docker inspect --format '{{.Config.Image}}' "$CONTAINER")
+  [[ $running == "$(ref_of "$digest")" ]] ||
+    { FAIL_REASON="running image $running is not the requested digest"; return 1; }
+  if ! out=$(timeout 120 docker exec -i -e SMOKE_BASE_URL=http://127.0.0.1:3000 "$CONTAINER" \
+    node --input-type=module <"$SMOKE_TEST" 2>&1); then
+    FAIL_REASON="smoke test failed: $(grep -m3 '^FAIL' <<<"$out" | tr '\n' ';')"
+    log info "smoke output: $(tr '\n' '|' <<<"$out")"
+    return 1
+  fi
+}
+
+dump_container_logs() {
+  docker logs --tail 30 "$CONTAINER" 2>&1 | while IFS= read -r line; do
+    log info "container: $line"
+  done || true
+}
+
+# Deploy CANDIDATE with automatic rollback. Returns 0 deployed, 1 rolled back or
+# not deployed, 2 rollback failed.
+deploy() {
+  local candidate=$1 trigger=$2 current restore revision
+  current=$(read_state current.digest)
+  # Rollback target: the current known-good release (or, when re-verifying the
+  # current release itself, the one before it).
+  restore=$current
+  [[ $restore == "$candidate" ]] && restore=$(read_state previous.digest)
+  log notice "deploying candidate=$candidate previous=${current:-none} trigger=$trigger"
+
+  if ! ensure_image "$candidate"; then
+    log err "result=pull-failed candidate=$candidate (will retry next cycle)"
+    return 1
+  fi
+  revision=$(image_label "$candidate" "$REVISION_LABEL")
+
+  if ! preflight "$candidate"; then
+    log err "result=preflight-failed candidate=$candidate reason=\"$FAIL_REASON\" (running service untouched)"
+    block "$candidate" "preflight: $FAIL_REASON"
+    record "preflight-failed candidate=$candidate reason=\"$FAIL_REASON\""
+    return 1
+  fi
+
+  write_state rollback.digest "${restore:-none}"
+
+  if start_and_verify "$candidate"; then
+    [[ -n $current && $current != "$candidate" ]] && write_state previous.digest "$current"
+    write_state current.digest "$candidate"
+    rm -f "$(blocked_file "$candidate")"
+    log notice "result=deployed candidate=$candidate revision=${revision:-unknown} previous=${current:-none}"
+    record "deployed candidate=$candidate revision=${revision:-unknown} previous=${current:-none}"
+    return 0
+  fi
+
+  local reason=$FAIL_REASON
+  log err "result=verification-failed candidate=$candidate revision=${revision:-unknown} reason=\"$reason\""
+  dump_container_logs
+  block "$candidate" "verification: $reason"
+
+  if [[ -z $restore ]]; then
+    compose "$candidate" stop api >/dev/null 2>&1 || true
+    log crit "result=failed-no-rollback candidate=$candidate: no previous known-good release; API stopped"
+    record "failed-no-rollback candidate=$candidate reason=\"$reason\""
+    return 2
+  fi
+
+  log warning "rolling back to previous=$restore"
+  if ensure_image "$restore" && start_and_verify "$restore"; then
+    write_state current.digest "$restore"
+    log warning "result=rolled-back candidate=$candidate restored=$restore reason=\"$reason\""
+    record "rolled-back candidate=$candidate restored=$restore reason=\"$reason\""
+    return 1
+  fi
+  log crit "result=ROLLBACK-FAILED candidate=$candidate previous=$restore reason=\"$FAIL_REASON\" - manual intervention required"
+  dump_container_logs
+  record "rollback-failed candidate=$candidate previous=$restore reason=\"$FAIL_REASON\""
+  return 2
+}
+
+# ---- commands ------------------------------------------------------------------
+with_lock() {
+  mkdir -p "$(dirname "$LOCK_FILE")"
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || { log info "another aetna-update run is in progress; skipping"; exit 0; }
+}
+
+cmd_check() {
+  local candidate current
+  if [[ -e $STATE_DIR/hold ]]; then
+    exit 0 # paused by an operator; see `aetna-update status`
+  fi
+  candidate=$(resolve_digest) || exit 1
+  current=$(read_state current.digest)
+  [[ $candidate == "$current" ]] && exit 0
+  [[ -e $(blocked_file "$candidate") ]] && exit 0 # known-failing; logged when blocked
+  deploy "$candidate" "$AETNA_RELEASE_TAG"
+}
+
+cmd_status() {
+  local current previous running f
+  current=$(read_state current.digest)
+  previous=$(read_state previous.digest)
+  echo "release tag:   $AETNA_IMAGE_REPO:$AETNA_RELEASE_TAG"
+  echo "tag resolves:  $(resolve_digest 2>/dev/null || echo '(unavailable)')"
+  echo "current:       ${current:-none} (revision $( [[ -n $current ]] && image_label "$current" "$REVISION_LABEL"))"
+  echo "previous:      ${previous:-none}"
+  running=$(docker inspect --format '{{.Config.Image}} {{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$CONTAINER" 2>/dev/null) ||
+    running='not running'
+  echo "container:     $running"
+  echo "updates:       $([[ -e $STATE_DIR/hold ]] && echo "PAUSED ($(cat "$STATE_DIR/hold"))" || echo automatic)"
+  echo "blocked:"
+  for f in "$STATE_DIR"/blocked/*; do
+    [[ -e $f ]] || { echo "  (none)"; break; }
+    echo "  $(sed -n 's/^digest=//p' "$f") $(sed -n 's/^time=//p' "$f") $(sed -n 's/^reason=//p' "$f")"
+  done
+}
+
+cmd_retry() {
+  local digest=${1:-}
+  if [[ -z $digest ]]; then digest=$(resolve_digest) || exit 1; fi
+  valid_digest "$digest" || die "not a digest: $digest"
+  rm -f "$(blocked_file "$digest")"
+  log notice "operator retry of candidate=$digest"
+  deploy "$digest" retry
+}
+
+cmd_deploy() {
+  local digest=${1:-}
+  valid_digest "$digest" || die "usage: aetna-update deploy sha256:<64 hex>"
+  write_state hold "manual deploy of $digest at $(date -u +%FT%TZ); run 'aetna-update resume' to re-enable automatic updates"
+  log notice "automatic updates paused for manual deploy of $digest"
+  rm -f "$(blocked_file "$digest")"
+  deploy "$digest" manual
+}
+
+cmd_rollback() {
+  local current previous
+  current=$(read_state current.digest)
+  previous=$(read_state previous.digest)
+  [[ -n $previous && $previous != "$current" ]] || die "no previous release recorded to roll back to"
+  log warning "operator rollback current=$current -> previous=$previous"
+  ensure_image "$previous" || die "cannot pull $previous"
+  if ! start_and_verify "$previous"; then
+    log crit "result=ROLLBACK-FAILED previous=$previous reason=\"$FAIL_REASON\""
+    exit 2
+  fi
+  block "$current" "operator rollback"
+  write_state current.digest "$previous"
+  write_state previous.digest "$current"
+  log notice "result=rolled-back restored=$previous blocked=$current"
+  record "operator-rollback restored=$previous blocked=$current"
+}
+
+main() {
+  local cmd=${1:-check}
+  [[ $# -gt 0 ]] && shift
+  load_config
+  mkdir -p "$STATE_DIR/blocked"
+  case $cmd in
+    check) with_lock; cmd_check ;;
+    status) cmd_status ;;
+    retry) with_lock; cmd_retry "$@" ;;
+    deploy) with_lock; cmd_deploy "$@" ;;
+    rollback) with_lock; cmd_rollback ;;
+    pause) write_state hold "paused by operator at $(date -u +%FT%TZ)" && log notice "automatic updates paused" ;;
+    resume) rm -f "$STATE_DIR/hold" && log notice "automatic updates resumed" ;;
+    *) die "usage: aetna-update [check|status|retry [sha256:…]|rollback|deploy sha256:…|pause|resume]" ;;
+  esac
+}
+
+main "$@"

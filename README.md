@@ -36,7 +36,7 @@ dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.m
 | Combined `year` + `genre` filtering, `sortOrder` on every listing                        | ✅ Implemented (V1 only)                     |
 | `/api/v2` (rebuilt dataset)                                                              | ⏳ Mounted, with no operations (returns 404) |
 | V2 dataset rebuilt from Kaggle sources                                                   | ⏳ Planned                                   |
-| Cloudflare Tunnel deployment                                                             | ⏳ Planned                                   |
+| Production deployment (Proxmox LXC, pull-based updater, Cloudflare Tunnel)               | ✅ Implemented; host not yet provisioned     |
 
 ## Technology stack
 
@@ -587,8 +587,37 @@ The Compose setup is meant for a Docker-enabled Proxmox LXC. A `cloudflared`
 connector running on the same host reaches the API at `http://127.0.0.1:${HOST_PORT}`,
 and nothing is exposed on a public interface. If `cloudflared` runs in a container
 instead, attach it to this project's Compose network and target `http://api:3000`.
-Tunnel configuration itself comes in a later phase. Cloudflare isn't needed to run
-the app.
+Cloudflare isn't needed to run the app.
+
+This `compose.yaml` is for local runs. Production uses
+[`deploy/compose.production.yaml`](deploy/compose.production.yaml) instead.
+
+## Production deployment
+
+Production runs at **<https://aetna-test.budarz.dev>** on a dedicated Proxmox LXC.
+The full runbook is [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): provisioning,
+datasets, tunnel, operations, rollback and test evidence. In short:
+
+- A systemd timer on the host runs [`deploy/bin/aetna-update`](deploy/bin/aetna-update)
+  every 60 seconds. It resolves `ghcr.io/svansig/aetna-take-home:production` to a
+  digest. When the digest changes, it pulls the image, validates the datasets,
+  replaces the container, waits for health, and runs
+  [`deploy/smoke-test.js`](deploy/smoke-test.js). If any check fails, it rolls
+  back to the previous digest and blocks the failed one. All connections are
+  outbound from the host: there's no SSH and no self-hosted runner.
+- The API runs by immutable digest, with a read-only root filesystem, as a
+  non-root user. Production SQLite files are mounted read-only from
+  `/srv/aetna/data`, and no ports are published.
+- A separate `cloudflared` container
+  ([`deploy/compose.tunnel.yaml`](deploy/compose.tunnel.yaml)) connects
+  outbound to Cloudflare and reaches the API over an internal Docker network.
+  API rollouts never restart it.
+
+```sh
+aetna-update status            # running commit and digest, blocked releases
+journalctl -u aetna-update -f  # deployment log
+aetna-update rollback          # restore the previous release
+```
 
 ## Project structure
 
@@ -617,6 +646,9 @@ src/
   docs/
     openapi.ts         OpenAPI 3.1 document builder and /docs, /openapi.json router
 test/                  Vitest + Supertest suites and helpers
+.github/workflows/     ci.yml (validation), publish.yml (GHCR release after CI on main)
+deploy/                Production: Compose files, host updater, systemd units, smoke test
+docs/DEPLOYMENT.md     Production runbook
 db/                    Supplied SQLite databases (read-only, never modified)
 kaggle/                Kaggle source CSVs for the future V2 rebuild (git- and docker-ignored)
 ```
@@ -788,7 +820,8 @@ V1 is complete. Planned, not implemented:
    through the same routes, schemas and service, with its own `MovieRepository`
    and `RatingSource`. This includes the correct TMDB↔MovieLens rating mapping
    (via `links_small.csv`), original language and recovered production companies.
-2. Deploy through a Cloudflare Tunnel.
+2. Provision the production LXC and Cloudflare Tunnel by following
+   [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). The configuration is in `deploy/`.
 
 ## Source data
 

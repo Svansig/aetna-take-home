@@ -1,0 +1,10 @@
+[Unit]
+Description=Check the public Movie Services API route every 5 minutes
+Documentation=https://github.com/Svansig/aetna-take-home/blob/main/docs/DEPLOYMENT.md
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

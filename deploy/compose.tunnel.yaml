@@ -1,0 +1,49 @@
+# Cloudflare Tunnel connector for aetna-test.budarz.dev.
+#
+# A separate Compose project from the API (compose.production.yaml), so API
+# deployments and rollbacks never recreate or restart it. The tunnel is remotely
+# managed: its public hostname and origin (http://aetna-api:3000) are configured
+# in the Cloudflare dashboard, and this container only needs the tunnel token.
+#
+# Start once (install.sh does this): docker compose -f compose.tunnel.yaml up -d
+name: aetna-tunnel
+
+services:
+  cloudflared:
+    # Pinned version and multi-arch index digest. Upgrade deliberately.
+    image: cloudflare/cloudflared:2026.10.3@sha256:faa8e0a1475f137c910be6025f43c8e4092fdd35461b31e19fd1390657a1ff39
+    container_name: aetna-cloudflared
+    restart: unless-stopped
+    command: [tunnel, --no-autoupdate, --metrics, '127.0.0.1:20241', run]
+    environment:
+      # Token read from a file, so it never appears in `docker inspect` or Git.
+      TUNNEL_TOKEN_FILE: /run/secrets/tunnel-token
+    secrets: [tunnel-token]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: [CMD, cloudflared, tunnel, --metrics, '127.0.0.1:20241', ready]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '5' }
+    networks:
+      # `egress`: outbound connections to Cloudflare. `origin`: reaches the API.
+      - egress
+      - origin
+
+secrets:
+  tunnel-token:
+    # Owned by 65532 (the image's non-root user), mode 0400. Never commit it.
+    file: /etc/aetna/tunnel-token
+
+networks:
+  egress: {}
+  origin:
+    name: aetna-origin
+    external: true
