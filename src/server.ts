@@ -31,16 +31,31 @@ function main(): void {
     process.exit(1);
   });
 
-  let v1MoviesDb: DatabaseSync;
-  try {
-    v1MoviesDb = openReadOnlyDatabase(config.V1_MOVIES_DB_PATH);
-  } catch (err) {
-    // Fail fast. The path goes to the operator log only, never to clients.
-    logger.fatal({ err, path: config.V1_MOVIES_DB_PATH }, 'Cannot open V1 movies database');
-    process.exit(1);
-  }
+  // One read-only connection per database for the life of the process.
+  const databases: { name: string; db: DatabaseSync }[] = [];
+  const closeDatabases = () => {
+    for (const { db } of databases.splice(0)) db.close();
+  };
+  const open = (name: string, path: string): DatabaseSync => {
+    try {
+      const db = openReadOnlyDatabase(path);
+      databases.push({ name, db });
+      return db;
+    } catch (err) {
+      // Fail fast. The path goes to the operator log only, never to clients.
+      logger.fatal({ err, database: name, path }, 'Cannot open database');
+      closeDatabases();
+      process.exit(1);
+    }
+  };
+  const v1MoviesDb = open('v1-movies', config.V1_MOVIES_DB_PATH);
+  const v1RatingsDb = open('v1-ratings', config.V1_RATINGS_DB_PATH);
+  logger.info({ databases: databases.map((d) => d.name) }, 'Databases opened read-only');
 
-  const app = createApp({ logger, versions: createApiVersions({ v1MoviesDb }) });
+  const app = createApp({
+    logger,
+    versions: createApiVersions({ v1MoviesDb, v1RatingsDb }),
+  });
   const server = createServer(app);
 
   server.on('error', (err) => {
@@ -67,9 +82,10 @@ function main(): void {
     }, SHUTDOWN_TIMEOUT_MS).unref();
 
     // Stops accepting new connections, closes idle keep-alive sockets and waits
-    // for in-flight requests to finish; only then is the database closed.
+    // for in-flight requests to finish; only then are the databases closed.
     server.close((err) => {
-      v1MoviesDb.close();
+      closeDatabases();
+      logger.info('Databases closed');
       if (err) {
         logger.error({ err }, 'Error during shutdown');
         process.exit(1);

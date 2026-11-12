@@ -1,35 +1,19 @@
 import { z } from 'zod';
+import { POSITIVE_INTEGER_PARAM_DOC, positiveIntegerParam } from './params.js';
 
 /** Fixed page size for every paginated list (not configurable by clients). */
 export const PAGE_SIZE = 50;
 
 /**
- * `page` query parameter: optional, 1-indexed, a base-10 integer written as plain
- * digits (no sign, decimal point, exponent or whitespace) and representable as a
- * safe JavaScript integer. Repeated `?page=` values reach us as an array and are
- * rejected. Unknown query parameters are stripped by `z.object`, not rejected.
+ * `page` query parameter: optional, 1-indexed, a positive base-10 integer (see
+ * `positiveIntegerParam`). Repeated `?page=` values are rejected. Unknown query
+ * parameters are stripped by `z.object`, not rejected.
  */
 export const PageQuerySchema = z.object({
-  page: z
-    .string({
-      error: (issue) =>
-        Array.isArray(issue.input) ? 'page must not be repeated' : 'page must be a string',
-    })
-    .regex(/^\d+$/, 'page must be a positive base-10 integer')
-    .transform(Number)
-    // The regex already guarantees an integer; this bounds it to the safe range.
-    .pipe(
-      z
-        .number()
-        .min(1, 'page must be at least 1')
-        .max(Number.MAX_SAFE_INTEGER, 'page is too large'),
-    )
+  page: positiveIntegerParam('page')
     .default(1)
-    // Documented as an integer (what clients send), not as the internal string pipeline.
     .meta({
-      type: 'integer',
-      minimum: 1,
-      maximum: Number.MAX_SAFE_INTEGER,
+      ...POSITIVE_INTEGER_PARAM_DOC,
       default: 1,
       example: 1,
       description: `1-indexed page number. Each page has ${String(PAGE_SIZE)} items.`,

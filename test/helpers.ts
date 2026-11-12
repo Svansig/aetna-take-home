@@ -20,20 +20,30 @@ export function createLogCapture() {
   return { lines, logger: createLogger('info', stream) };
 }
 
-let suppliedDb: DatabaseSync | undefined;
+let suppliedMovies: DatabaseSync | undefined;
+let suppliedRatings: DatabaseSync | undefined;
 
 /**
- * Shared read-only connection to the supplied `db/movies.db`, resolved the same way
- * as in production. Read-only mode guarantees tests can't modify it.
+ * Shared read-only connections to the supplied `db/movies.db` and `db/ratings.db`,
+ * resolved the same way as in production. Read-only mode guarantees tests can't
+ * modify them.
  */
 export function suppliedMoviesDb(): DatabaseSync {
-  suppliedDb ??= openReadOnlyDatabase(loadConfig({}).V1_MOVIES_DB_PATH);
-  return suppliedDb;
+  suppliedMovies ??= openReadOnlyDatabase(loadConfig({}).V1_MOVIES_DB_PATH);
+  return suppliedMovies;
 }
 
-/** The production version wiring, backed by the supplied database. */
-export function createTestVersions(db: DatabaseSync = suppliedMoviesDb()): ApiVersion[] {
-  return createApiVersions({ v1MoviesDb: db });
+export function suppliedRatingsDb(): DatabaseSync {
+  suppliedRatings ??= openReadOnlyDatabase(loadConfig({}).V1_RATINGS_DB_PATH);
+  return suppliedRatings;
+}
+
+/** The production version wiring, backed by the supplied databases by default. */
+export function createTestVersions(
+  moviesDb: DatabaseSync = suppliedMoviesDb(),
+  ratingsDb: DatabaseSync = suppliedRatingsDb(),
+): ApiVersion[] {
+  return createApiVersions({ v1MoviesDb: moviesDb, v1RatingsDb: ratingsDb });
 }
 
 /** Build the app with injected test dependencies. No network listener is opened. */
@@ -53,6 +63,10 @@ export interface FixtureMovie {
   genres?: string | null;
   releaseDate?: string | null;
   budget?: number | null;
+  overview?: string | null;
+  runtime?: number | string | null;
+  language?: string | null;
+  productionCompanies?: string | null;
 }
 
 /**
@@ -65,8 +79,10 @@ export function createFixtureMoviesDb(movies: FixtureMovie[]): DatabaseSync {
     title TEXT NOT NULL, overview TEXT, productionCompanies TEXT, releaseDate TEXT,
     budget INTEGER, revenue INTEGER, runtime REAL, language TEXT, genres TEXT, status TEXT)`);
   const insert = db.prepare(
-    `INSERT INTO movies (movieId, imdbId, title, genres, releaseDate, budget)
-     VALUES (:movieId, :imdbId, :title, :genres, :releaseDate, :budget)`,
+    `INSERT INTO movies (movieId, imdbId, title, genres, releaseDate, budget,
+                         overview, runtime, language, productionCompanies)
+     VALUES (:movieId, :imdbId, :title, :genres, :releaseDate, :budget,
+             :overview, :runtime, :language, :productionCompanies)`,
   );
   for (const m of movies) {
     insert.run({
@@ -76,7 +92,26 @@ export function createFixtureMoviesDb(movies: FixtureMovie[]): DatabaseSync {
       genres: m.genres === undefined ? '[]' : m.genres,
       releaseDate: m.releaseDate === undefined ? '2000-01-01' : m.releaseDate,
       budget: m.budget === undefined ? 0 : m.budget,
+      overview: m.overview === undefined ? 'An overview.' : m.overview,
+      runtime: m.runtime === undefined ? 90 : m.runtime,
+      language: m.language === undefined ? null : m.language,
+      productionCompanies: m.productionCompanies === undefined ? '[]' : m.productionCompanies,
     });
   }
+  return db;
+}
+
+/**
+ * In-memory database with the same `ratings` schema as the supplied file. Each
+ * entry is `[movieId, rating]`; users and timestamps are synthetic.
+ */
+export function createFixtureRatingsDb(ratings: [movieId: number, rating: number][]): DatabaseSync {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE ratings (ratingId INTEGER PRIMARY KEY, userId INTEGER NOT NULL,
+    movieId INTEGER NOT NULL, rating REAL NOT NULL, timestamp INTEGER NOT NULL)`);
+  const insert = db.prepare(
+    'INSERT INTO ratings (userId, movieId, rating, timestamp) VALUES (?, ?, ?, 0)',
+  );
+  ratings.forEach(([movieId, rating], i) => insert.run(i + 1, movieId, rating));
   return db;
 }

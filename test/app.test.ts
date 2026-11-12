@@ -54,10 +54,14 @@ describe('API documentation', () => {
     });
   });
 
-  it('documents only operations that exist (V1 movie listing; nothing under V2)', async () => {
+  it('documents only operations that exist (V1 movies; nothing under V2)', async () => {
     const { app } = createTestApp();
     const res = await request(app).get('/openapi.json');
-    expect(Object.keys(res.body.paths as object)).toEqual(['/health', '/api/v1/movies']);
+    expect(Object.keys(res.body.paths as object)).toEqual([
+      '/health',
+      '/api/v1/movies',
+      '/api/v1/movies/{movieId}',
+    ]);
   });
 
   it('includes operations registered by an API version under its prefix', async () => {

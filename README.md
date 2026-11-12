@@ -3,9 +3,15 @@
 A read-only TypeScript/Express API over a movie metadata dataset and a user ratings
 dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.md).
 
-> **Status: Phase 1.** User Story 1 (**List All Movies**) is implemented at
-> `GET /api/v1/movies`. The other three user stories (Movie Details, Movies By
-> Year, Movies By Genre) are **not implemented yet**, and V2 isn't operational.
+> **Status: Phase 2.** User Story 1 (**List All Movies**, `GET /api/v1/movies`)
+> and User Story 2 (**Movie Details**, `GET /api/v1/movies/{movieId}`) are
+> implemented. Movies By Year and Movies By Genre are **not implemented yet**, and
+> V2 isn't operational.
+>
+> ⚠️ **V1 average ratings may belong to a different movie.** The supplied movies
+> and ratings databases use different movie id systems (TMDB vs MovieLens), and V1
+> deliberately matches them by the raw number. See
+> [V1 ratings: the identifier mismatch](#v1-ratings-the-identifier-mismatch).
 
 ## Implemented vs. planned
 
@@ -19,7 +25,8 @@ dataset. The original brief and user stories are in [ASSIGNMENT.md](ASSIGNMENT.m
 | OpenAPI 3.1 at `/openapi.json`, Swagger UI at `/docs` | ✅ Implemented                               |
 | Docker image and Compose deployment                   | ✅ Implemented                               |
 | **US1 List All Movies:** `GET /api/v1/movies`         | ✅ Implemented (V1 only)                     |
-| US2 Movie Details (with average rating)               | ⏳ Planned                                   |
+| **US2 Movie Details:** `GET /api/v1/movies/{movieId}` | ✅ Implemented (V1 only, naive ratings join) |
+| Correct movie ↔ rating id mapping                     | ⏳ Planned for V2                            |
 | US3 Movies By Year                                    | ⏳ Planned                                   |
 | US4 Movies By Genre                                   | ⏳ Planned                                   |
 | `/api/v2` (rebuilt dataset)                           | ⏳ Mounted, with no operations (returns 404) |
@@ -90,6 +97,7 @@ Then open:
 - OpenAPI document: <http://127.0.0.1:3000/openapi.json>
 - Health: <http://127.0.0.1:3000/health>
 - Movies: <http://127.0.0.1:3000/api/v1/movies?page=2>
+- Movie details: <http://127.0.0.1:3000/api/v1/movies/11>
 
 ## Endpoints
 
@@ -161,6 +169,81 @@ In Swagger UI (`/docs`), open **Movies (v1) → GET /api/v1/movies**, choose
 **Try it out**, enter a `page` and click **Execute**. Swagger validates
 `page ≥ 1` in the browser, so use curl to see the server's 400 response.
 
+### `GET /api/v1/movies/{movieId}`: movie details (User Story 2)
+
+Returns one movie from `db/movies.db`, with its average rating from `db/ratings.db`.
+
+**`movieId`** is the numeric `movieId` from the movies database (a TMDB id), not an
+IMDb id. It follows the same rules as `page`: a positive base-10 integer of plain
+digits, at most 2^53−1, with leading zeros allowed (`011` means 11).
+
+| Status | When                                                                                                       |
+| ------ | ---------------------------------------------------------------------------------------------------------- |
+| `200`  | The movie exists, whether or not it has ratings.                                                           |
+| `400`  | `VALIDATION_ERROR`: `movieId` is `0`, negative, decimal, exponential, alphabetic, an IMDb id or too large. |
+| `404`  | `MOVIE_NOT_FOUND`: the id is valid but no movie has it (for example, `1`).                                 |
+| `500`  | `INTERNAL_ERROR`: an unexpected error, such as malformed stored genres. Details are only logged.           |
+
+**Response:** exactly these ten fields, not wrapped in the pagination envelope.
+
+| Field                 | Type             | Source                       | Notes                                                                                                                  |
+| --------------------- | ---------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `imdbId`              | string           | `movies.imdbId`              | Same as the listing. `""` for 17 source records.                                                                       |
+| `title`               | string           | `movies.title`               |                                                                                                                        |
+| `description`         | string \| null   | `movies.overview`            | Verbatim. `null` when the source is empty (959 movies).                                                                |
+| `releaseDate`         | string \| null   | `movies.releaseDate`         | Same as the listing: `YYYY-MM-DD` or `null`.                                                                           |
+| `budget`              | integer          | `movies.budget`              | Whole US dollars, as stored. `0` stays `0` and often means "not recorded".                                             |
+| `runtime`             | number \| null   | `movies.runtime`             | Minutes, as stored (not rounded). `null` for the 257 movies stored with an empty value.                                |
+| `averageRating`       | number \| null   | `ratings.db`                 | Mean on a 0.5–5.0 scale, rounded to 2 decimals. `null` (never `0`) when no ratings match. **See the V1 caveat below.** |
+| `genres`              | `{ id, name }[]` | `movies.genres`              | Same parsing as the listing.                                                                                           |
+| `originalLanguage`    | string \| null   | `movies.language`            | Always `null` in V1: the column is empty for all 45,430 movies.                                                        |
+| `productionCompanies` | `{ id, name }[]` | `movies.productionCompanies` | `[]` for the 483 movies whose stored JSON is malformed (see below).                                                    |
+
+The five fields shared with the listing come from the same Zod schema
+(`MovieDetailsSchema = MovieSummarySchema.extend(...)`), so the two contracts
+can't drift.
+
+```sh
+curl 'http://127.0.0.1:3000/api/v1/movies/11'    # Star Wars, naive averageRating 3.69
+curl 'http://127.0.0.1:3000/api/v1/movies/398'   # Capote: averageRating null, productionCompanies []
+curl 'http://127.0.0.1:3000/api/v1/movies/1'     # 404
+curl 'http://127.0.0.1:3000/api/v1/movies/abc'   # 400
+```
+
+In Swagger UI, open **Movies (v1) → GET /api/v1/movies/{movieId}**, choose
+**Try it out**, enter a `movieId` (for example `11`) and click **Execute**.
+
+**Malformed production companies.** 483 movies store production-company text
+that isn't valid JSON, mostly because of unescaped quotes in company names (for
+example, `"Cooper"s Town Productions"` for Capote). V1 returns `[]` for these and
+the request still succeeds. Nothing is repaired or guessed. Recovering these
+names is follow-on work. Company JSON that parses but has an unexpected shape is
+still treated as a data-integrity error (500), as genres are. No current record
+does this.
+
+#### V1 ratings: the identifier mismatch
+
+The two supplied databases use **different movie identifier systems**:
+`movies.movieId` is a **TMDB** id and `ratings.movieId` is a **MovieLens** id.
+Checked against the original Kaggle files, `ratings.db` matches `ratings_small.csv`,
+and the TMDB↔MovieLens mapping lives in `links_small.csv`, which isn't part of
+the supplied data.
+
+**V1 deliberately uses the naive association `movies.movieId = ratings.movieId`**
+(`NaiveSqliteRatingSource`). This is a baseline built from only the supplied
+databases. Many V1 averages therefore come from an unrelated movie, and movies
+can get a rating, or `null`, by numeric coincidence. For example:
+
+| Movie            | movies.db id | V1 (naive) uses | V1 `averageRating`    | Correct MovieLens id | Correct average    |
+| ---------------- | ------------ | --------------- | --------------------- | -------------------- | ------------------ |
+| Star Wars (1977) | 11           | MovieLens 11    | **3.69** (82 ratings) | 260                  | 4.22 (291 ratings) |
+
+**Do not treat V1 `averageRating` values as correct.** The warning is in this
+README and in the OpenAPI description, not in each JSON response, so the
+response contract stays unchanged. **V2 (planned, not implemented)** will rebuild
+the data from the Kaggle sources with the correct id mapping and plug in its own
+`RatingSource`, with no change to the HTTP layer.
+
 ## Scripts
 
 | Script                  | Purpose                                    |
@@ -189,16 +272,22 @@ Configuration tests call `loadConfig(env)` with explicit objects and never read
 
 The movie tests use three kinds of data:
 
-- **The supplied `db/movies.db`, opened read-only.** End-to-end requests run
-  through Express, validation, the service, the repository and SQLite. Results
-  are checked against independent SQL queries for ordering, page contents, the
-  45,430 total, the 909 pages and the 30-movie final page. Every one of the 45,430
-  rows is also mapped and compared with its raw values.
-- **In-memory SQLite fixtures** for edge cases the real data doesn't contain:
-  malformed genre JSON, impossible dates, NULL or negative budgets, an empty
-  table, and a closed connection.
-- **An injected fake repository** for service rules, such as never computing an
-  offset for a page past the end.
+- **The supplied `db/movies.db` and `db/ratings.db`, opened read-only.**
+  - End-to-end requests run through Express, validation, the service, the
+    repository and SQLite. Results are checked against independent SQL queries
+    for ordering, page contents, totals and naive rating averages.
+  - Every one of the 45,430 movies is mapped for both the listing and the
+    details, and the documented null and `[]` counts are checked.
+  - The Star Wars (3.69) and Capote examples are checked verbatim.
+  - A test confirms the SHA-256 hashes of both databases don't change during
+    the detail requests.
+- **In-memory SQLite fixtures** for edge cases and exact arithmetic:
+  - malformed genre and company JSON, empty or non-numeric runtimes, impossible
+    dates, NULL budgets
+  - rating averages and rounding, movies with no ratings
+  - an empty table and closed connections
+- **Injected fakes** for service rules: never computing an offset for a page
+  past the end, 404 for unknown ids, and half-up rounding (1.005 → 1.01).
 
 Infrastructure coverage:
 
@@ -258,13 +347,15 @@ src/
     errors.ts          ErrorResponse schema, HttpError, 404 + central error handlers
     health.ts          GET /health and its OpenAPI registration
     pagination.ts      PAGE_SIZE, page query schema, pagination metadata, page → LIMIT/OFFSET
+    params.ts          Shared positive-integer parameter validation (page, movieId)
     request-logger.ts  pino-http: request ids, per-request logging
   movies/
-    schemas.ts         Genre, MovieSummary, MovieListResponse (Zod; the source of types and docs)
-    repository.ts      MovieRepository interface (implemented per version)
-    sqlite-movie-repository.ts  V1 implementation: prepared SQL, row validation, genre parsing
-    service.ts         MovieService: pagination rules, response assembly (no Express)
-    routes.ts          Shared router factory and OpenAPI registration for /movies
+    schemas.ts         Genre, MovieSummary, MovieListResponse, ProductionCompany, MovieDetails, movieId param
+    repository.ts      MovieRepository and RatingSource interfaces (implemented per version)
+    sqlite-movie-repository.ts  V1 movies: prepared SQL, row validation, JSON parsing, fallbacks
+    naive-sqlite-rating-source.ts  V1 ratings: naive numeric-id aggregate over ratings.db
+    service.ts         MovieService: pagination, details, 404, rating rounding (no Express)
+    routes.ts          Shared router factory and OpenAPI registration for /movies, /movies/{movieId}
   docs/
     openapi.ts         OpenAPI 3.1 document builder and /docs, /openapi.json router
 test/                  Vitest + Supertest suites and helpers
@@ -275,9 +366,10 @@ kaggle/                Kaggle source CSVs for the future V2 rebuild (git- and do
 ## API versions
 
 - **`/api/v1`** serves the **original supplied databases, unchanged**, and keeps
-  their known limitations. Today that means `GET /api/v1/movies`. One example: `movies.movieId` holds TMDB ids,
-  while `ratings.movieId` holds MovieLens ids, so the two columns aren't directly
-  comparable even though they share a name.
+  their known limitations. Today that means `GET /api/v1/movies` and
+  `GET /api/v1/movies/{movieId}`. Most importantly, `movies.movieId` holds TMDB
+  ids while `ratings.movieId` holds MovieLens ids, and V1 deliberately matches
+  them by the raw number, so its average ratings are unreliable.
 - **`/api/v2`** (planned, not operational) will serve a dataset **rebuilt from
   the Kaggle source files**, with corrected identifier mappings and data
   transformations. It's mounted but has no operations, so it returns 404.
@@ -287,8 +379,9 @@ pagination, error handling, documentation conventions, and business logic where
 behaviour is the same. Only data access differs. Each version is an `ApiVersion`
 (`{ id, router, registerDocs? }`) built in `createApiVersions()` and passed to
 `createApp`. The movie router, schemas and `MovieService` are shared. V1 injects
-`SqliteMovieRepository` over `movies.db`. V2 will provide its own `MovieRepository`
-in the same composition root, without changing the shared HTTP code.
+`SqliteMovieRepository` over `movies.db` and `NaiveSqliteRatingSource` over
+`ratings.db`. V2 will provide its own `MovieRepository` and a correctly mapped
+`RatingSource` in the same composition root, without changing the shared HTTP code.
 
 **OpenAPI conventions:**
 
@@ -306,11 +399,26 @@ in the same composition root, without changing the shared HTTP code.
   reproducible. It opens the supplied database read-only on Node 26 with no
   experimental warning. The tradeoff is that `better-sqlite3` is more battle-tested
   and has a slightly richer API.
-- **One read-only connection for the process.** `server.ts` opens `movies.db` at
-  startup with `readOnly: true` and passes it into the composition root. It exits
-  if the file can't be opened, and closes the connection after in-flight requests
-  finish at shutdown. The repository prepares its statements once. A synchronous
-  driver in a single-threaded process needs no pool.
+- **One read-only connection per database for the process.** `server.ts` opens
+  `movies.db` and `ratings.db` at startup with `readOnly: true` and passes both
+  into the composition root. If either can't be opened, it logs which one and
+  exits. It closes both after in-flight requests finish at shutdown. Each
+  repository prepares its statements once. A synchronous driver in a
+  single-threaded process needs no pool.
+- **Separate connections rather than `ATTACH`.** Each database stays
+  independently injectable, so tests can pair real movies with fixture ratings.
+  It also keeps the naive cross-database association out of SQL joins.
+- **`RatingSource`, separate from `MovieRepository`.** Ratings live in a
+  different database, and the movie↔rating association is exactly what changes
+  between V1 (naive) and V2 (planned corrected mapping). The service combines the
+  two, so neither the route nor the shared business logic needs to know which is
+  used.
+- **Rating aggregation in SQL, rounding in the service.** The source returns
+  `COUNT` and `TOTAL(rating)` for one id. The service computes the mean and rounds
+  it half-up to 2 decimals as `round(sum × 100 / count) / 100`, which avoids
+  floating-point errors at exact halves (1.005 → 1.01). `ratings.movieId` has no
+  index and the schema must not change, so each lookup scans 100,004 rows (about
+  2 ms). That's acceptable here, so there's no caching.
 - **Pagination happens in SQLite.** The query is `ORDER BY movieId LIMIT ? OFFSET ?`
   with bound parameters. `movieId` is the table's `INTEGER PRIMARY KEY` (its
   rowid), so ordering needs no extra index and nothing was added to the schema.
@@ -321,7 +429,8 @@ in the same composition root, without changing the shared HTTP code.
   its genre JSON is parsed in the repository. Anything unexpected raises a
   `DataIntegrityError`, which the central handler logs (with the row id and failing
   fields, not the record contents) and answers with a generic 500. Today all
-  45,430 rows pass.
+  45,430 rows pass. The one agreed exception is unparseable production-company
+  JSON, which becomes `[]`.
 - **No ORM or framework.** The data is two read-only tables, so plain SQL in
   version-specific repositories (from Phase 1) is simpler and easier to read.
 - **Dependency injection through factory parameters, not a container.** `createApp`
@@ -339,30 +448,39 @@ in the same composition root, without changing the shared HTTP code.
 
 ## Known limitations
 
-- Only User Story 1 is implemented. Movie details, by year and by genre don't
+- User Stories 1 and 2 are implemented. Movies By Year and Movies By Genre don't
   exist yet, and nothing under `/api/v2` is implemented.
+- **V1 average ratings are joined by a mismatched id** (TMDB vs MovieLens) and
+  may describe another movie. See
+  [V1 ratings: the identifier mismatch](#v1-ratings-the-identifier-mismatch).
 - V1 returns the supplied data as-is, including these issues:
   - **17 movies have an empty `imdbId` (`""`).** It's returned unchanged, so
     treat `""` as "unknown".
   - **36,550 movies (about 80%) have `budget: 0`.** V1 can't tell "unknown"
     apart from a real zero, so it returns `0` as stored.
   - **84 movies have no release date.** It's returned as `null`.
-  - `movies.movieId` (TMDB) and `ratings.movieId` (MovieLens) are different id
-    systems. This matters for Movie Details, not for this endpoint.
+  - **All 45,430 movies have no language.** `originalLanguage` is always `null`.
+    V2 is planned to restore it from the upstream data.
+  - **483 movies have malformed production-company JSON.** These return `[]`.
+  - **257 movies store runtime as an empty value.** These return `null`.
+    Another 1,558 have runtime `0`, returned as stored.
+  - **959 movies have an empty overview.** `description` is `null` for these.
 - Offset pagination isn't snapshot-consistent in general. That's harmless here
   because V1 data is read-only.
-- `ratings.db` and `V2_DB_PATH` are validated for shape only, not opened or
-  checked for existence.
+- Rating lookups scan the unindexed `ratings` table (about 2 ms each), because
+  the supplied schema must not change.
+- `V2_DB_PATH` is validated for shape only, not opened or checked for existence.
 - The Docker base image is pinned by tag, not digest.
 - Swagger UI loads its assets from the app, so it doesn't depend on a CDN. The
   `/docs` → `/docs/` redirect assumes the app is served at the host root.
 
 ## Remaining work
 
-1. Movie details, including the average rating from the ratings database.
-2. Movies by year (with sort direction) and movies by genre.
-3. Build the V2 dataset from `kaggle/` and implement V2 data access.
-4. Deploy through a Cloudflare Tunnel.
+1. Movies by year (with sort direction) and movies by genre.
+2. Build the V2 dataset from `kaggle/` and implement V2 data access. This
+   includes the correct TMDB↔MovieLens rating mapping (via `links_small.csv`),
+   original language and recovered production companies.
+3. Deploy through a Cloudflare Tunnel.
 
 ## Source data
 
