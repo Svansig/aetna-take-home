@@ -35,6 +35,8 @@ ENV NODE_ENV=production \
 COPY package.json ./
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+# Static landing page served at / (resolved from the project root, /app).
+COPY public ./public
 
 # Databases are not baked in; mount them read-only at /app/db (see compose.yaml).
 USER node

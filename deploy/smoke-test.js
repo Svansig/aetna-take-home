@@ -49,6 +49,20 @@ function expectPage(body) {
 
 const checks = [
   [
+    'GET / (landing page and stylesheet)',
+    async () => {
+      const page = await get('/');
+      expectStatus(page, 200);
+      expect(
+        String(page.headers.get('content-type')).startsWith('text/html'),
+        'expected an HTML page',
+      );
+      expect(page.body.includes('Movie Services API'), 'expected the landing page');
+      const css = await get('/styles.css');
+      expect(css.status === 200, `stylesheet: HTTP ${String(css.status)}`);
+    },
+  ],
+  [
     'GET /health',
     async () => {
       const res = await get('/health');
