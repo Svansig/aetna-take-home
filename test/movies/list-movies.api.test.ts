@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { FIRST_PAGE_EXAMPLE } from '../../src/movies/routes.js';
+import { FIRST_PAGE_EXAMPLE } from '../../src/openapi/movie-examples.js';
 import {
   MovieListResponseSchema,
   USD_PATTERN,

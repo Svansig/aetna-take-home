@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
-import { GENRE_EXAMPLES } from '../../src/movies/routes.js';
+import { GENRE_EXAMPLES } from '../../src/openapi/movie-examples.js';
 import {
   MovieListResponseSchema,
   type MovieListResponse,

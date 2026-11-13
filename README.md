@@ -236,11 +236,17 @@ src/
   app.ts          createApp({ logger, apiRouter }) mounts the API at /api/v1;
                   createMoviesApi({ moviesDb, ratingsDb }) is the composition root
   config.ts       Zod env schema and loadConfig(env)
-  docs/openapi.ts OpenAPI document builder; /docs and /openapi.json
+  openapi/        Everything that builds the OpenAPI document (the Zod schemas stay with their modules):
+    document.ts       buildOpenApiDocument: info, tags, path registrations
+    router.ts         /openapi.json and Swagger UI at /docs
+    health.ts         /health operation
+    movies.ts         /movies operations
+    movie-examples.ts Example responses, checked against the supplied databases by tests
+    params.ts         OpenAPI types for parameters parsed from strings
   http/           Error envelope and handlers, /health, pagination, parameter parsing, request logging
   db/sqlite.ts    Read-only connection helper; DataIntegrityError
   movies/
-    routes.ts                      Express routes (validate, call the service) and OpenAPI registration
+    routes.ts                      Express routes (validate, call the service)
     schemas.ts                     Zod request/response schemas
     service.ts                     MovieService: filtering, sorting, pagination, ratings, budget formatting
     repository.ts                  MovieRepository and RatingSource interfaces
