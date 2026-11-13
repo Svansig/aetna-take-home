@@ -44,7 +44,8 @@ describe('server process', () => {
         }
       });
     });
-    const exited = once(child, 'exit') as Promise<[number | null, NodeJS.Signals | null]>;
+    // 'close', not 'exit': 'exit' can fire before stdout is drained, losing the final log lines.
+    const exited = once(child, 'close') as Promise<[number | null, NodeJS.Signals | null]>;
 
     try {
       await Promise.race([
@@ -73,6 +74,13 @@ describe('server process', () => {
     expect(logs.find((l) => l.msg === 'Databases closed')).toMatchObject({
       databases: ['movies', 'ratings'],
     });
-    expect(logs.at(-1)).toMatchObject({ msg: 'Shutdown complete' });
+    // Presence only, not order: pino's async stdout can write the queued lines on exit
+    // ahead of one still in flight.
+    expect(logs.map((l) => l.msg)).toEqual(
+      expect.arrayContaining([
+        'Shutting down: no longer accepting connections',
+        'Shutdown complete',
+      ]),
+    );
   });
 });
