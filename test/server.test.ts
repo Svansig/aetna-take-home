@@ -44,7 +44,8 @@ describe('server process', () => {
         }
       });
     });
-    const exited = once(child, 'exit') as Promise<[number | null, NodeJS.Signals | null]>;
+    // 'close', not 'exit': 'exit' can fire before stdout is drained, losing the final log lines.
+    const exited = once(child, 'close') as Promise<[number | null, NodeJS.Signals | null]>;
 
     try {
       await Promise.race([
