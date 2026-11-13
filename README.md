@@ -4,8 +4,10 @@
 
 A read-only TypeScript/Express API over the two supplied SQLite databases,
 `db/movies.db` and `db/ratings.db`, which are used unmodified. The original brief
-is in [ASSIGNMENT.md](ASSIGNMENT.md), and every interpretation of it is recorded
-in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md).
+is in [ASSIGNMENT.md](ASSIGNMENT.md). Every interpretation of it is recorded
+in [docs/ASSUMPTIONS.md](docs/ASSUMPTIONS.md), and every other engineering
+decision (technology, architecture, security posture, release) in
+[docs/DECISIONS.md](docs/DECISIONS.md).
 
 All four user stories are implemented under `/api/v1`:
 
@@ -118,6 +120,7 @@ and `productionCompanies` (`{ id, name }[]`).
 | Status | Code               | When                                                                      |
 | ------ | ------------------ | ------------------------------------------------------------------------- |
 | `400`  | `VALIDATION_ERROR` | An invalid or repeated parameter; all are validated before any lookup.    |
+| `4xx`  | `BAD_REQUEST`      | A request Express itself rejects, such as a malformed `%` escape.         |
 | `404`  | `MOVIE_NOT_FOUND`  | A valid `movieId` that no movie has.                                      |
 | `404`  | `GENRE_NOT_FOUND`  | A valid genre that no movie has.                                          |
 | `404`  | `NOT_FOUND`        | Any unregistered route.                                                   |
@@ -169,7 +172,7 @@ The `movieId` tie-break makes every order total, so pages never overlap or skip.
 ## 7. API documentation
 
 - **Swagger UI:** <http://127.0.0.1:3000/docs>. Every operation is under the
-  **Movies** tag, with real response examples (checked against the database by
+  **Movies** tag (`/health` is under **Operations**), with real response examples (checked against the database by
   tests). Use **Try it out** to call the running server; the filter fields start
   empty, so leaving them blank lists every movie.
 - **OpenAPI 3.1:** <http://127.0.0.1:3000/openapi.json>, generated from the same

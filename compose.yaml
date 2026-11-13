@@ -1,7 +1,7 @@
-# Single-service deployment for a Docker-enabled host (e.g. a Proxmox LXC).
-# The API is published on the host's loopback interface only, where a locally
-# running Cloudflare Tunnel connector (cloudflared) can reach it at
-# http://127.0.0.1:${HOST_PORT}. It is never bound to a public interface.
+# Local single-service run, built from source. The API is published on the
+# host's loopback interface only (http://127.0.0.1:${HOST_PORT}), never on a
+# public interface. Production doesn't use this file: see
+# deploy/compose.production.yaml and docs/DEPLOYMENT.md.
 services:
   api:
     build: .

@@ -254,9 +254,9 @@ docker run --rm -i node:26.13.0-slim node --input-type=module - https://aetna-te
 ```
 
 or, from any machine with Node.js and a checkout: `node deploy/smoke-test.js https://aetna-test.budarz.dev`.
-This covers `/health`, `/openapi.json`, `/docs/` and its assets,
-`/api/v1/movies`, `/api/v1/movies/11`, `/api/v1/movies/year/1999` and
-`/api/v1/movies/genre/28`. Then, in a browser, open
+This covers `/` and its stylesheet, `/health`, `/openapi.json`, `/docs/` and
+its assets, `/api/v1/movies`, `/api/v1/movies/11`, `/api/v1/movies/year/1999`,
+`/api/v1/movies/genre/28`, and a `404` for an unknown movie id. Then, in a browser, open
 <https://aetna-test.budarz.dev/docs>, confirm Swagger UI loads (no failed assets
 in the browser console), expand **GET /api/v1/movies/{movieId}**, choose
 **Try it out** with `11`, and check that the request goes to
@@ -435,7 +435,10 @@ verified.
 
 ## 12. Test evidence
 
-**Validated locally** (Docker 29.9 on Linux amd64, 2026-11-12). Not on Proxmox:
+**Validated locally** (Docker 29.9 on Linux amd64, 2026-11-12). Not on Proxmox.
+The counts below are from that run, before the landing page was added. The tree
+now has 510 tests and 9 smoke checks, and the deployment path hasn't been re-run
+since:
 
 - CI commands pass on the current tree (format, lint, typecheck, 472 tests,
   build). Each fails with a non-zero exit for an intentionally failing test, a

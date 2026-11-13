@@ -2,7 +2,9 @@
 
 The brief ([ASSIGNMENT.md](../ASSIGNMENT.md)) leaves several details open. This
 document records every interpretation made while implementing it, so a reviewer
-can challenge any of them in one place.
+can challenge any of them in one place. Decisions that aren't interpretations of
+the brief (technology, architecture, security, release) are in
+[DECISIONS.md](DECISIONS.md).
 
 **Status key**
 
