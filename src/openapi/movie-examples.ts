@@ -1,10 +1,10 @@
 import { PAGE_SIZE } from '../http/pagination.js';
 import type { MovieDetails, MovieListResponse } from '../movies/schemas.js';
 
-/**
- * The first three movies of page 1 in the supplied database, verbatim. A test
- * checks them against the database so the documentation can't drift.
- */
+// Real responses from the supplied databases, truncated to three movies.
+// Tests check them against the databases so the documentation can't drift.
+
+/** Page 1, no filters. */
 export const FIRST_PAGE_EXAMPLE: MovieListResponse = {
   data: [
     {
@@ -44,11 +44,7 @@ export const FIRST_PAGE_EXAMPLE: MovieListResponse = {
   pagination: { page: 1, pageSize: PAGE_SIZE, totalItems: 45430, totalPages: 909 },
 };
 
-/**
- * The first three movies of 1999 (page 1 of 15) in each direction, verbatim from
- * the supplied database. A test checks them against the database. 67 movies of
- * 1999 share the date 1999-01-01, so ascending order shows the movieId tie-break.
- */
+/** 1999 was chosen because many of its movies share 1999-01-01, which shows the movieId tie-break. */
 export const YEAR_1999_EXAMPLES = {
   asc: {
     data: [
@@ -124,7 +120,7 @@ export const YEAR_1999_EXAMPLES = {
   },
 } satisfies Record<'asc' | 'desc', MovieListResponse>;
 
-/** A valid year with no movies in the supplied database (checked by a test). */
+/** A valid year with no movies. */
 export const EMPTY_YEAR_EXAMPLE = {
   year: 1850,
   response: {
@@ -133,10 +129,6 @@ export const EMPTY_YEAR_EXAMPLE = {
   },
 } satisfies { year: number; response: MovieListResponse };
 
-/**
- * Genre and combined-filter pages from the supplied database, verbatim (first
- * three movies of page 1). A test checks them against the database.
- */
 export const GENRE_EXAMPLES = {
   action: {
     data: [
@@ -226,10 +218,8 @@ export const GENRE_EXAMPLES = {
 } satisfies Record<string, MovieListResponse>;
 
 /**
- * Real detail responses, verbatim. A test checks them against the supplied
- * databases. Star Wars shows the naive rating association: 3.69 comes from
- * MovieLens movie 11, while Star Wars' real MovieLens id 260 averages 4.22.
- * Capote shows both a `null` rating and the malformed-company fallback.
+ * Star Wars shows the naive rating match. Capote shows a `null` rating and the
+ * malformed-company fallback.
  */
 export const DETAILS_EXAMPLES = {
   11: {

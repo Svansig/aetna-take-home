@@ -9,19 +9,18 @@ import {
 
 export const GenreSchema = z
   .strictObject({
+    /** TMDB genre id. */
     id: z.int().meta({ description: 'TMDB genre id.', example: 18 }),
+    /** Genre name as stored. */
     name: z.string().meta({ example: 'Drama' }),
   })
   .meta({ id: 'Genre' });
 
 export type Genre = z.infer<typeof GenreSchema>;
 
-/**
- * Fields shared by the listing and the details, as the repository returns them.
- * `budget` is still the stored whole-dollar integer here; the service formats it
- * for clients (see `formatUsd`).
- */
+/** Fields shared by the listing and the details, except `budget`, which is formatted for clients. */
 const summaryRecordShape = {
+  /** Primary key in `movies.db` (a TMDB id, not an IMDb id). */
   movieId: z
     .int()
     .min(1)
@@ -31,14 +30,18 @@ const summaryRecordShape = {
         '`GET /movies/{movieId}`. Not an IMDb id.',
       example: 5,
     }),
+  /** IMDb id as stored; a few records have ''. */
   imdbId: z.string().meta({
     description:
       'IMDb identifier, e.g. `tt0113101`, returned as stored. A few ' +
       'source records have an empty string here.',
     example: 'tt0113101',
   }),
+  /** Movie title. */
   title: z.string().meta({ example: 'Four Rooms' }),
+  /** May be empty. */
   genres: z.array(GenreSchema).meta({ description: 'May be empty.' }),
+  /** `YYYY-MM-DD` with no time zone, or `null` when unknown. */
   releaseDate: z.iso.date().nullable().meta({
     description: 'Calendar date (`YYYY-MM-DD`) with no time zone. `null` when unknown.',
     example: '1995-12-09',
@@ -48,6 +51,7 @@ const summaryRecordShape = {
 /** Internal listing record: public fields with the budget as whole dollars. */
 export const MovieSummaryRecordSchema = z.strictObject({
   ...summaryRecordShape,
+  /** Whole US dollars, unformatted. */
   budget: z.int().min(0),
 });
 
@@ -68,7 +72,11 @@ const usdBudget = () =>
     });
 
 export const MovieSummarySchema = z
-  .strictObject({ ...summaryRecordShape, budget: usdBudget() })
+  .strictObject({
+    ...summaryRecordShape,
+    /** Formatted as `$1,234,567`. */
+    budget: usdBudget(),
+  })
   .meta({ id: 'MovieSummary' });
 
 export type MovieSummary = z.infer<typeof MovieSummarySchema>;
@@ -82,7 +90,6 @@ export type MovieListResponse = z.infer<typeof MovieListResponseSchema>;
 
 export const SORT_ORDERS = ['asc', 'desc'] as const;
 
-/** Listing direction. Case-sensitive. */
 export type SortOrder = (typeof SORT_ORDERS)[number];
 
 const sortOrderParam = (description: string) =>
@@ -102,11 +109,16 @@ const YEAR_DESCRIPTION =
   'Release year as exactly four digits, `0001` to `9999`. A valid year with no movies ' +
   'returns an empty page, not a 404.';
 
-/**
- * A genre reference as parsed from a request: all decimal digits is a TMDB genre
- * id, anything else is a genre name (matched case-insensitively, exactly otherwise).
- */
-export type GenreRef = { readonly id: number } | { readonly name: string };
+/** A request's `genre`: all digits is a genre id, anything else is a name. */
+export type GenreRef =
+  | {
+      /** TMDB genre id. */
+      readonly id: number;
+    }
+  | {
+      /** Genre name, matched case-insensitively. */
+      readonly name: string;
+    };
 
 const genreParam = () =>
   z
@@ -135,6 +147,7 @@ const GENRE_DESCRIPTION =
 
 /** `/movies/year/:year` path parameter. */
 export const MovieYearParamsSchema = z.object({
+  /** Release year. */
   year: fourDigitYearParam('year').meta({
     ...FOUR_DIGIT_YEAR_PARAM_DOC,
     description: YEAR_DESCRIPTION,
@@ -144,6 +157,7 @@ export const MovieYearParamsSchema = z.object({
 
 /** `/movies/genre/:genre` path parameter. */
 export const MovieGenreParamsSchema = z.object({
+  /** Genre id or name. */
   genre: genreParam().meta({
     ...GENRE_PARAM_DOC,
     description: GENRE_DESCRIPTION,
@@ -151,39 +165,41 @@ export const MovieGenreParamsSchema = z.object({
   }),
 });
 
-/** Query for `/movies/year/:year`: `page` and chronological `sortOrder`. Unknown keys are ignored. */
+/** Query for `/movies/year/:year`. */
 export const MoviesByYearQuerySchema = PageQuerySchema.extend({
+  /** Chronological direction; defaults to `asc`. */
   sortOrder: sortOrderParam(SORT_BY_DATE),
 });
 
-/** Query for `/movies/genre/:genre`: `page` and `sortOrder` by movieId. Unknown keys are ignored. */
+/** Query for `/movies/genre/:genre`. */
 export const MoviesByGenreQuerySchema = PageQuerySchema.extend({
+  /** Direction by `movieId`; defaults to `asc`. */
   sortOrder: sortOrderParam(SORT_BY_ID),
 });
 
-/**
- * Query for `/movies`: `page`, `sortOrder` and the optional `year` and `genre`
- * filters, combined with AND. Unknown keys are ignored.
- */
+/** Query for `/movies`. */
 export const MovieListQuerySchema = PageQuerySchema.extend({
-  // No `example` on the filters: Swagger UI would pre-fill it and turn "list all"
-  // into a filtered request.
+  // No `example` on the filters: Swagger UI would pre-fill them.
+  /** Optional release-year filter; switches to chronological order. */
   year: fourDigitYearParam('year')
     .optional()
     .meta({
       ...FOUR_DIGIT_YEAR_PARAM_DOC,
       description: `Optional filter. ${YEAR_DESCRIPTION}`,
     }),
+  /** Optional genre filter. */
   genre: genreParam()
     .optional()
     .meta({ ...GENRE_PARAM_DOC, description: `Optional filter. ${GENRE_DESCRIPTION}` }),
+  /** Direction by `movieId`, or chronological with `year`; defaults to `asc`. */
   sortOrder: sortOrderParam(
     `Without \`year\`: ${SORT_BY_ID} With \`year\` (chronological): ${SORT_BY_DATE}`,
   ),
 });
 
-/** `:movieId` path parameter: the numeric id from movies.db, not an IMDb id. */
+/** `/movies/:movieId` path parameter. */
 export const MovieIdParamsSchema = z.object({
+  /** Primary key in `movies.db`. */
   movieId: positiveIntegerParam('movieId').meta({
     ...POSITIVE_INTEGER_PARAM_DOC,
     description:
@@ -195,7 +211,9 @@ export const MovieIdParamsSchema = z.object({
 
 export const ProductionCompanySchema = z
   .strictObject({
+    /** TMDB company id. */
     id: z.int().meta({ description: 'TMDB company id.', example: 1 }),
+    /** Company name as stored. */
     name: z.string().meta({ example: 'Lucasfilm' }),
   })
   .meta({ id: 'ProductionCompany' });
@@ -203,9 +221,11 @@ export const ProductionCompanySchema = z
 export type ProductionCompany = z.infer<typeof ProductionCompanySchema>;
 
 const detailRecordShape = {
+  /** Plot overview, or `null` when empty. */
   description: z.string().nullable().meta({
     description: 'Plot overview, verbatim from the source. `null` when the source is empty.',
   }),
+  /** Minutes as stored, or `null` when empty. */
   runtime: z
     .number()
     .min(0)
@@ -216,6 +236,7 @@ const detailRecordShape = {
         'empty. `0` is returned as stored.',
       example: 121,
     }),
+  /** Always `null` in the supplied data. */
   originalLanguage: z
     .string()
     .nullable()
@@ -225,6 +246,7 @@ const detailRecordShape = {
         'language values.',
       example: null,
     }),
+  /** `[]` when the stored JSON is malformed. */
   productionCompanies: z.array(ProductionCompanySchema).meta({
     description:
       'May be empty. The 483 source records whose company data is malformed JSON ' +
@@ -232,17 +254,15 @@ const detailRecordShape = {
   }),
 };
 
-/** What a movie repository returns for one movie: everything except the rating, budget unformatted. */
+/** One movie as the repository returns it: no rating, budget unformatted. */
 export const MovieRecordSchema = MovieSummaryRecordSchema.extend(detailRecordShape);
 
 export type MovieRecord = z.infer<typeof MovieRecordSchema>;
 
-/**
- * Single-movie details: the listing fields, reused from `MovieSummarySchema` so
- * the two contracts can't drift, plus the detail-only fields.
- */
+/** Extends `MovieSummarySchema` so the listing and details contracts can't drift. */
 export const MovieDetailsSchema = MovieSummarySchema.extend({
   ...detailRecordShape,
+  /** Mean rating (0.5–5.0, 2 decimals), or `null` with no ratings. May belong to another movie. */
   averageRating: z
     .number()
     .min(0.5)

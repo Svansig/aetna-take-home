@@ -282,8 +282,6 @@ describe('movies by year: validation', () => {
 });
 
 describe('existing endpoints are unchanged', () => {
-  // Phase 4 changed this deliberately: sortOrder is now validated and applied
-  // (by movieId) on unfiltered listings too.
   it('keeps the unfiltered listing in movieId order, with sortOrder=desc reversing it', async () => {
     const plain = await getList('/api/v1/movies');
     expect({ ...plain, data: plain.data.slice(0, 3) }).toEqual(FIRST_PAGE_EXAMPLE);

@@ -1,21 +1,12 @@
 import { z } from 'zod';
 
-/**
- * Zod error message for a single-valued request parameter. A repeated query
- * parameter arrives as an array, which gets its own message; any other invalid
- * input gets `message`.
- */
+/** Zod error callback that gives repeated query parameters (parsed as arrays) their own message. */
 export function singleValueError(name: string, message: string) {
   return (issue: { input?: unknown }): string =>
     Array.isArray(issue.input) ? `${name} must not be repeated` : message;
 }
 
-/**
- * A request parameter holding a positive base-10 integer written as plain digits
- * (no sign, decimal point, exponent or whitespace) and representable as a safe
- * JavaScript integer. Output is a number. A repeated query parameter is rejected.
- * `name` is used in error messages.
- */
+/** Positive integer written as plain digits (no sign, decimal point or exponent), within the safe range. */
 export function positiveIntegerParam(name: string) {
   return (
     z
@@ -32,11 +23,7 @@ export function positiveIntegerParam(name: string) {
   );
 }
 
-/**
- * A request parameter holding a calendar year written as exactly four decimal
- * digits, `0001` through `9999`. Output is the year as a number. A repeated query
- * parameter is rejected.
- */
+/** Calendar year written as exactly four digits, `0001` to `9999`. */
 export function fourDigitYearParam(name: string) {
   const message = `${name} must be a four-digit year from 0001 to 9999`;
   return z

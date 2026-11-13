@@ -3,11 +3,7 @@ import type { LogLevel } from './config.js';
 
 export type { Logger };
 
-/**
- * Structured JSON logger writing to stdout. Pretty-printing is a dev-time concern
- * handled by piping through `pino-pretty` (see `npm run dev`), so the application
- * always emits the same machine-readable format.
- */
+/** JSON logger to stdout. Pretty-printing is done outside the app by `pino-pretty` in `npm run dev`. */
 export function createLogger(level: LogLevel, destination?: DestinationStream): Logger {
   return pino(
     {

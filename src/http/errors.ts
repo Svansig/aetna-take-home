@@ -4,18 +4,25 @@ import { z } from 'zod';
 /** Public JSON error body shared by every endpoint. */
 export const ErrorResponseSchema = z
   .object({
+    /** The error itself. */
     error: z.object({
+      /** Stable, machine-readable error code. */
       code: z.string().meta({ example: 'NOT_FOUND' }),
+      /** Human-readable explanation. */
       message: z.string().meta({ example: 'Route GET /nope not found' }),
+      /** Field-level problems; only present for validation errors. */
       details: z
         .array(
           z.object({
+            /** Dotted path of the invalid field. */
             path: z.string().meta({ example: 'page' }),
+            /** What is wrong with it. */
             message: z.string(),
           }),
         )
         .optional()
         .meta({ description: 'Field-level problems; present for validation errors.' }),
+      /** Same value as the `X-Request-Id` header. */
       requestId: z
         .string()
         .optional()
@@ -26,13 +33,12 @@ export const ErrorResponseSchema = z
 
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 
-/**
- * An error whose status, code and message are safe to show to clients.
- * Anything else reaching the error handler is treated as an unexpected 500.
- */
+/** An error whose status, code and message are safe to show to clients. */
 export class HttpError extends Error {
   constructor(
+    /** HTTP status code. */
     readonly status: number,
+    /** Machine-readable code for `ErrorResponse.error.code`. */
     readonly code: string,
     message: string,
   ) {
@@ -42,9 +48,8 @@ export class HttpError extends Error {
 }
 
 /**
- * Express-internal client errors (e.g. a malformed `%`-encoding in a path parameter)
- * carry a 4xx `status`. Under the http-errors convention their messages are safe to
- * expose unless `expose` is explicitly false.
+ * Express's own 4xx errors, e.g. a malformed `%`-encoding in a path. Under the
+ * http-errors convention, their messages are safe to expose unless `expose` is false.
  */
 function isExposedClientError(err: unknown): err is { status: number; message: string } {
   if (typeof err !== 'object' || err === null) return false;
@@ -62,11 +67,7 @@ export const notFoundHandler: RequestHandler = (req, _res, next) => {
   next(new HttpError(404, 'NOT_FOUND', `Route ${req.method} ${req.path} not found`));
 };
 
-/**
- * Centralised error handler. Client errors get a descriptive body; unexpected
- * errors are logged in full and answered with a generic 500 — never a stack trace,
- * SQL statement or filesystem path.
- */
+/** Client errors get a descriptive body; anything else is logged and answered with a generic 500. */
 export const errorHandler: ErrorRequestHandler = (err: unknown, req, res, next) => {
   if (res.headersSent) {
     // Too late to send a JSON body; let Express close the connection.

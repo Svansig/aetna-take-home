@@ -3,25 +3,32 @@ import { DatabaseSync } from 'node:sqlite';
 export type { DatabaseSync };
 
 /**
- * Open an existing SQLite file read-only. One connection is opened at startup and
- * shared: `node:sqlite` is synchronous, and a read-only connection is safe to reuse
- * for every request in this single-threaded process. Throws if the file is missing
- * or unreadable, so the server fails fast at startup.
+ * Opens an existing SQLite file read-only; throws if it's missing. A single
+ * connection is shared by all requests, which is safe because `node:sqlite` is
+ * synchronous.
  */
 export function openReadOnlyDatabase(filePath: string): DatabaseSync {
   return new DatabaseSync(filePath, { readOnly: true });
 }
 
+/** Logged with a `DataIntegrityError`. Must not hold record contents. */
+export interface DataIntegrityContext {
+  /** Table the bad row came from. */
+  table: string;
+  /** Primary key of the bad row, if it could be read. */
+  rowId: unknown;
+  /** One message per failing field. */
+  issues: string[];
+}
+
 /**
- * Stored data that doesn't match the expected shape. It is never "repaired" or
- * skipped. The central error handler logs it with this context and returns a
- * generic 500. The context identifies the row and the failing fields but holds no
- * record contents.
+ * Stored data with an unexpected shape. It is never repaired or skipped, and
+ * clients get a generic 500.
  */
 export class DataIntegrityError extends Error {
   constructor(
     message: string,
-    readonly context: { table: string; rowId: unknown; issues: string[] },
+    readonly context: DataIntegrityContext,
   ) {
     super(message);
     this.name = 'DataIntegrityError';
