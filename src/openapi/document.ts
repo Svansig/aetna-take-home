@@ -1,12 +1,10 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { OpenAPIRegistry, OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi';
-import { Router } from 'express';
-import swaggerUi from 'swagger-ui-express';
 import { PROJECT_ROOT } from '../config.js';
 import { ErrorResponseSchema } from '../http/errors.js';
-import { registerHealthDocs } from '../http/health.js';
-import { registerMoviesDocs } from '../movies/routes.js';
+import { registerHealthDocs } from './health.js';
+import { registerMoviesDocs } from './movies.js';
 
 export type OpenApiDocument = ReturnType<OpenApiGeneratorV31['generateDocument']>;
 
@@ -79,19 +77,4 @@ export function buildOpenApiDocument(apiBasePath: string): OpenApiDocument {
       { name: 'Operations', description: 'Operational endpoints.' },
     ],
   });
-}
-
-/** Serves the machine-readable document and Swagger UI. */
-export function docsRouter(document: OpenApiDocument): Router {
-  const router = Router();
-  router.get('/openapi.json', (_req, res) => {
-    res.json(document);
-  });
-  // serveFiles (not `serve`) keeps the document scoped to this router instance.
-  router.use(
-    '/docs',
-    swaggerUi.serveFiles(document),
-    swaggerUi.setup(document, { customSiteTitle: 'Movie Services API' }),
-  );
-  return router;
 }

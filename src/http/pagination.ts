@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { POSITIVE_INTEGER_PARAM_DOC, positiveIntegerParam } from './params.js';
+import { POSITIVE_INTEGER_PARAM_DOC } from '../openapi/params.js';
+import { positiveIntegerParam } from './params.js';
 
 /** Fixed page size for every paginated list (not configurable by clients). */
 export const PAGE_SIZE = 50;

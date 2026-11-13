@@ -1,6 +1,5 @@
 import express, { type Express, type Router } from 'express';
 import type { DatabaseSync } from './db/sqlite.js';
-import { buildOpenApiDocument, docsRouter } from './docs/openapi.js';
 import { errorHandler, notFoundHandler } from './http/errors.js';
 import { healthRouter } from './http/health.js';
 import { landingPage } from './http/landing.js';
@@ -10,6 +9,8 @@ import { NaiveSqliteRatingSource } from './movies/naive-sqlite-rating-source.js'
 import { createMoviesRouter } from './movies/routes.js';
 import { MovieService } from './movies/service.js';
 import { SqliteMovieRepository } from './movies/sqlite-movie-repository.js';
+import { buildOpenApiDocument } from './openapi/document.js';
+import { docsRouter } from './openapi/router.js';
 
 /** URL prefix of every API operation. */
 export const API_BASE_PATH = '/api/v1';

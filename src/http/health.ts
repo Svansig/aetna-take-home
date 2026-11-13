@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
 
 export const HealthResponseSchema = z
@@ -17,19 +16,4 @@ export function healthRouter(): Router {
     res.json({ status: 'ok' } satisfies z.infer<typeof HealthResponseSchema>);
   });
   return router;
-}
-
-export function registerHealthDocs(registry: OpenAPIRegistry): void {
-  registry.registerPath({
-    method: 'get',
-    path: '/health',
-    tags: ['Operations'],
-    summary: 'Liveness check',
-    responses: {
-      200: {
-        description: 'The process is up.',
-        content: { 'application/json': { schema: HealthResponseSchema } },
-      },
-    },
-  });
 }

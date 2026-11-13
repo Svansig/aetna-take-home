@@ -1,12 +1,11 @@
 import { z } from 'zod';
 import { PageQuerySchema, paginatedResponseSchema } from '../http/pagination.js';
+import { fourDigitYearParam, positiveIntegerParam, singleValueError } from '../http/params.js';
 import {
   FOUR_DIGIT_YEAR_PARAM_DOC,
-  fourDigitYearParam,
+  GENRE_PARAM_DOC,
   POSITIVE_INTEGER_PARAM_DOC,
-  positiveIntegerParam,
-  singleValueError,
-} from '../http/params.js';
+} from '../openapi/params.js';
 
 export const GenreSchema = z
   .strictObject({
@@ -128,8 +127,6 @@ const genreParam = () =>
       }
       return { name: value };
     });
-
-const GENRE_PARAM_DOC = { type: 'string', minLength: 1 } as const;
 
 const GENRE_DESCRIPTION =
   'A genre id (all digits, e.g. `28`) or a genre name (e.g. `Action`, `science fiction`). ' +

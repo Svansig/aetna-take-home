@@ -4,7 +4,7 @@ import {
   EMPTY_YEAR_EXAMPLE,
   FIRST_PAGE_EXAMPLE,
   YEAR_1999_EXAMPLES,
-} from '../../src/movies/routes.js';
+} from '../../src/openapi/movie-examples.js';
 import {
   MovieListResponseSchema,
   MovieSummarySchema,

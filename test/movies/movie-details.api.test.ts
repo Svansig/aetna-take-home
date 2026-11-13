@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/config.js';
-import { DETAILS_EXAMPLES } from '../../src/movies/routes.js';
+import { DETAILS_EXAMPLES } from '../../src/openapi/movie-examples.js';
 import { MovieDetailsSchema, type MovieDetails } from '../../src/movies/schemas.js';
 import {
   createFixtureMoviesDb,
