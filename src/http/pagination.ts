@@ -5,12 +5,9 @@ import { positiveIntegerParam } from './params.js';
 /** Fixed page size for every paginated list (not configurable by clients). */
 export const PAGE_SIZE = 50;
 
-/**
- * `page` query parameter: optional, 1-indexed, a positive base-10 integer (see
- * `positiveIntegerParam`). Repeated `?page=` values are rejected. Unknown query
- * parameters are stripped by `z.object`, not rejected.
- */
+/** Optional 1-indexed `page` query parameter. */
 export const PageQuerySchema = z.object({
+  /** 1-indexed page number; defaults to 1. */
   page: positiveIntegerParam('page')
     .default(1)
     .meta({
@@ -25,9 +22,13 @@ export type PageQuery = z.infer<typeof PageQuerySchema>;
 
 export const PaginationMetaSchema = z
   .strictObject({
+    /** The requested page, even when it is past the end. */
     page: z.int().min(1).meta({ description: 'The requested page number.' }),
+    /** Always `PAGE_SIZE`. */
     pageSize: z.literal(PAGE_SIZE).meta({ description: 'Always 50.' }),
+    /** Number of items matching the request across all pages. */
     totalItems: z.int().min(0).meta({ description: 'Total number of matching items.' }),
+    /** 0 when there are no items. */
     totalPages: z
       .int()
       .min(0)
@@ -39,7 +40,14 @@ export type PaginationMeta = z.infer<typeof PaginationMetaSchema>;
 
 /** `{ data: T[], pagination }`, registered as a named OpenAPI component. */
 export function paginatedResponseSchema<T extends z.ZodType>(item: T, id: string) {
-  return z.strictObject({ data: z.array(item), pagination: PaginationMetaSchema }).meta({ id });
+  return z
+    .strictObject({
+      /** Items on this page; empty past the end. */
+      data: z.array(item),
+      /** Position and totals for the whole list. */
+      pagination: PaginationMetaSchema,
+    })
+    .meta({ id });
 }
 
 export function totalPages(totalItems: number): number {
@@ -48,7 +56,9 @@ export function totalPages(totalItems: number): number {
 
 /** SQL-style LIMIT/OFFSET for one page. */
 export interface PageWindow {
+  /** Maximum number of rows to return. */
   readonly limit: number;
+  /** Number of rows to skip. */
   readonly offset: number;
 }
 
@@ -61,16 +71,23 @@ export function pageWindow(page: number): PageWindow {
   return { limit: PAGE_SIZE, offset };
 }
 
+/** A page of items with its pagination metadata. */
+export interface Page<T> {
+  /** Items on this page; empty past the end. */
+  data: T[];
+  /** Position and totals for the whole list. */
+  pagination: PaginationMeta;
+}
+
 /**
- * One page of a list of `totalItems` items, using the shared pagination rules. A
- * page past the end returns an empty `data` array with accurate metadata, and
- * `fetch` is not called, so no offset is computed for it however large the page.
+ * One page of `totalItems` items. A page past the end returns empty `data`
+ * without calling `fetch`, so huge page numbers never produce an offset.
  */
 export function paginate<T>(
   page: number,
   totalItems: number,
   fetch: (window: PageWindow) => T[],
-): { data: T[]; pagination: PaginationMeta } {
+): Page<T> {
   const pages = totalPages(totalItems);
   return {
     data: page <= pages ? fetch(pageWindow(page)) : [],

@@ -14,20 +14,29 @@ import {
 
 /** Raw column types as stored in the `movies` table (listing columns). */
 const MovieRowSchema = z.object({
+  /** INTEGER PRIMARY KEY; a TMDB id. */
   movieId: z.int(),
+  /** IMDb id; sometimes ''. */
   imdbId: z.string(),
+  /** Movie title. */
   title: z.string(),
+  /** JSON array of `{ id, name }`. */
   genres: z.string(),
+  /** `YYYY-MM-DD`, or '' when unknown. */
   releaseDate: z.string().nullable(),
+  /** Whole US dollars; 0 usually means not recorded. */
   budget: z.int(),
 });
 
 /** Listing columns plus the detail-only columns. */
 const MovieDetailsRowSchema = MovieRowSchema.extend({
+  /** Plot summary; becomes `description`. */
   overview: z.string().nullable(),
-  // REAL minutes; 257 source rows store '' instead.
+  /** REAL minutes; some source rows store '' instead. */
   runtime: z.union([z.number(), z.literal('')]).nullable(),
+  /** Original language; empty in the supplied data. */
   language: z.string().nullable(),
+  /** JSON array of `{ id, name }`; sometimes invalid JSON. */
   productionCompanies: z.string(),
 });
 
@@ -36,17 +45,12 @@ type MovieRow = z.infer<typeof MovieRowSchema>;
 const SUMMARY_COLUMNS = 'movieId, imdbId, title, genres, releaseDate, budget';
 
 /**
- * The one movie filter, shared by the count, the listing and the genre check so
- * they always agree. Each condition is switched off by binding NULL to its
- * parameters, so every filter combination uses the same prepared statements.
+ * Shared by the count, listing and genre check so they always agree. Binding NULL
+ * turns a condition off, so every filter combination reuses the same statements.
  *
- * - Year: `releaseDate` is stored as `YYYY-MM-DD` text, so the inclusive string
- *   range `YYYY-01-01`..`YYYY-12-31` selects exactly that year with no date
- *   function, and year 9999 needs no year 10000. Missing dates never match.
- * - Genre: `genres` is a JSON array of `{ id, name }`. `json_each` matches the
- *   `id` field, or the `name` field with ASCII case-insensitive `NOCASE` (all
- *   genre names are ASCII). `EXISTS` returns each movie at most once, even if its
- *   array lists a genre twice, and needs no join.
+ * - Year: `releaseDate` is `YYYY-MM-DD` text, so a string range selects the year.
+ * - Genre: `NOCASE` is ASCII-only, which is fine because all genre names are
+ *   ASCII. `EXISTS` keeps a movie that lists a genre twice from appearing twice.
  */
 const FILTER_CONDITION = `
   (:yearStart IS NULL OR releaseDate BETWEEN :yearStart AND :yearEnd)
@@ -56,19 +60,13 @@ const FILTER_CONDITION = `
         OR genre.value ->> 'name' = :genreName COLLATE NOCASE
   ))`;
 
-/** The only ORDER BY clauses a sort can produce; nothing from the request reaches SQL. */
+/** Fixed ORDER BY clauses, so nothing from the request reaches SQL. */
 const ORDER_BY = {
   movieId: { asc: 'movieId ASC', desc: 'movieId DESC' },
   releaseDate: { asc: 'releaseDate ASC, movieId ASC', desc: 'releaseDate DESC, movieId DESC' },
 } as const satisfies Record<MovieSort['by'], Record<SortOrder, string>>;
 
-/**
- * Movie repository over the original supplied `movies.db`.
- *
- * Statements are prepared once per connection. `movieId` is the table's INTEGER
- * PRIMARY KEY (the rowid), so ordering by it, LIMIT/OFFSET and lookup by id use
- * the table's own b-tree and need no extra index.
- */
+/** `movieId` is the rowid, so sorting and lookups by id need no extra index. */
 export class SqliteMovieRepository implements MovieRepository {
   private readonly countStatement: StatementSync;
   private readonly listStatements: Record<MovieSort['by'], Record<SortOrder, StatementSync>>;
@@ -126,7 +124,7 @@ export class SqliteMovieRepository implements MovieRepository {
   }
 }
 
-/** Bind values for `FILTER_CONDITION`: every parameter is always bound, NULL when unused. */
+/** Bind values for `FILTER_CONDITION`; unused ones are NULL. */
 function filterParams({ releaseYear, genre }: MovieFilter) {
   const year = releaseYear === undefined ? undefined : yearBounds(releaseYear);
   if (genre !== undefined && 'id' in genre && !Number.isSafeInteger(genre.id)) {
@@ -141,15 +139,23 @@ function filterParams({ releaseYear, genre }: MovieFilter) {
 }
 
 /** `node:sqlite` silently accepts unsafe numbers, so windows are checked first. */
-function checkedWindow({ limit, offset }: PageWindow): { limit: number; offset: number } {
+function checkedWindow({ limit, offset }: PageWindow): PageWindow {
   if (!Number.isSafeInteger(limit) || !Number.isSafeInteger(offset) || limit < 0 || offset < 0) {
     throw new RangeError('limit and offset must be non-negative safe integers');
   }
   return { limit, offset };
 }
 
-/** Inclusive ISO date bounds of a calendar year, e.g. 1999 -> 1999-01-01..1999-12-31. */
-export function yearBounds(year: number): { yearStart: string; yearEnd: string } {
+/** Inclusive ISO date bounds of a calendar year. */
+export interface YearBounds {
+  /** `YYYY-01-01`. */
+  yearStart: string;
+  /** `YYYY-12-31`. */
+  yearEnd: string;
+}
+
+/** e.g. 1999 -> 1999-01-01..1999-12-31. */
+export function yearBounds(year: number): YearBounds {
   if (!Number.isInteger(year) || year < 1 || year > 9999) {
     throw new RangeError('year must be an integer from 1 to 9999');
   }
@@ -168,7 +174,6 @@ function integrityError(rowId: unknown, issues: string[]): DataIntegrityError {
 const describeIssues = (error: z.ZodError): string[] =>
   error.issues.map((i) => `${i.path.map(String).join('.') || '(root)'}: ${i.message}`);
 
-/** Validate raw column types, raising a DataIntegrityError on mismatch. */
 function parseRow<T extends z.ZodType>(schema: T, raw: unknown): z.infer<T> {
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
@@ -177,10 +182,9 @@ function parseRow<T extends z.ZodType>(schema: T, raw: unknown): z.infer<T> {
   return parsed.data;
 }
 
-/** The source stores missing text values as '' (NULL is also allowed by the schema). */
+/** The source stores missing values as ''. */
 const emptyToNull = <T>(value: T | '' | null): T | null => (value === '' ? null : value);
 
-/** Public summary fields, shared by listing and details. Genres must be valid JSON. */
 function summaryFields(row: MovieRow) {
   let genres: unknown;
   try {
@@ -199,10 +203,8 @@ function summaryFields(row: MovieRow) {
 }
 
 /**
- * Agreed fallback: 483 source rows hold production-company text that isn't
- * valid JSON (mostly unescaped quotes in company names). Those return `[]` rather
- * than failing the request, and no repair is attempted. JSON that parses but has
- * the wrong shape is still rejected by the schema as an integrity error.
+ * Agreed fallback: some source rows contain invalid JSON (unescaped quotes in
+ * company names). They return `[]` instead of failing, with no repair attempted.
  */
 function parseProductionCompanies(text: string): unknown {
   try {
@@ -212,7 +214,7 @@ function parseProductionCompanies(text: string): unknown {
   }
 }
 
-/** Map a stored listing row to a summary record, refusing anything malformed. */
+/** Throws `DataIntegrityError` on a malformed row. */
 export function toMovieSummary(raw: unknown): MovieSummaryRecord {
   const row = parseRow(MovieRowSchema, raw);
   const summary = MovieSummaryRecordSchema.safeParse(summaryFields(row));
@@ -222,7 +224,7 @@ export function toMovieSummary(raw: unknown): MovieSummaryRecord {
   return summary.data;
 }
 
-/** Map a stored detail row to a movie record (every field except the rating; budget unformatted). */
+/** Throws `DataIntegrityError` on a malformed row. */
 export function toMovieRecord(raw: unknown): MovieRecord {
   const row = parseRow(MovieDetailsRowSchema, raw);
   const record = MovieRecordSchema.safeParse({

@@ -9,21 +9,15 @@ export interface MovieFilter {
   readonly genre?: GenreRef | undefined;
 }
 
-/**
- * Listing order. `releaseDate` sorts by date, then by `movieId` in the same
- * direction for equal dates; `movieId` sorts by the stable primary identifier.
- */
+/** Listing order. Equal `releaseDate`s are ordered by `movieId` in the same direction. */
 export interface MovieSort {
+  /** Primary sort column. */
   readonly by: 'movieId' | 'releaseDate';
+  /** Direction for the sort column and the `movieId` tie-break. */
   readonly order: SortOrder;
 }
 
-/**
- * Movie data access used by `MovieService` (implemented by
- * `SqliteMovieRepository`). Implementations return
- * validated application records (budgets as whole-dollar integers; the service
- * formats them) and order results deterministically.
- */
+/** Movie data access. Returns validated records, with budgets as whole-dollar integers. */
 export interface MovieRepository {
   /** Number of movies matching `filter` (`{}` counts all). */
   countMovies(filter: MovieFilter): number;
@@ -37,15 +31,13 @@ export interface MovieRepository {
 
 /** Raw rating aggregate for one movie. `sum` is 0 when `count` is 0. */
 export interface RatingStats {
+  /** Number of matching ratings. */
   readonly count: number;
+  /** Sum of the matching ratings. */
   readonly sum: number;
 }
 
-/**
- * Where a movie's ratings come from, given the movies database's `movieId`.
- * This is separate from `MovieRepository` because ratings live in another
- * database that uses a different movie id system (see `NaiveSqliteRatingSource`).
- */
+/** Kept separate from `MovieRepository` because ratings live in another database with different movie ids. */
 export interface RatingSource {
   statsForMovie(movieId: number): RatingStats;
 }

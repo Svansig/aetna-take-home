@@ -10,7 +10,7 @@ import type {
   SortOrder,
 } from './schemas.js';
 
-/** A valid movie id that doesn't exist. The central handler turns it into a 404. */
+/** A valid movie id that doesn't exist. */
 export class MovieNotFoundError extends HttpError {
   constructor(movieId: number) {
     super(404, 'MOVIE_NOT_FOUND', `Movie ${String(movieId)} not found`);
@@ -32,19 +32,22 @@ export class GenreNotFoundError extends HttpError {
   }
 }
 
-/** What to list: a page, a direction and optional filters (combined with AND). */
+/** Filters are combined with AND. */
 export interface MovieListCriteria {
+  /** 1-indexed page number. */
   readonly page: number;
+  /** Direction of the listing order. */
   readonly sortOrder: SortOrder;
+  /** Only movies released in this year; also switches to chronological order. */
   readonly releaseYear?: number | undefined;
+  /** Only movies with this genre. Unknown genres are a 404. */
   readonly genre?: GenreRef | undefined;
 }
 
 /**
- * Arithmetic mean rounded half-up to 2 decimal places, or `null` with no ratings.
- * The rounding works on `sum * 100 / count` instead of `mean * 100`. Ratings have
- * at most 2 decimals, so `sum * 100` is an exact integer, and an exact half lands
- * exactly on .5. For example, a true mean of 1.005 rounds to 1.01, not 1.00.
+ * Mean rounded half-up to 2 decimals, or `null` with no ratings. Rounds
+ * `sum * 100 / count` rather than `mean * 100`, which avoids float error:
+ * 1.005 rounds to 1.01, not 1.00.
  */
 export function averageRating({ sum, count }: RatingStats): number | null {
   if (count === 0) return null;
@@ -58,10 +61,7 @@ const USD = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 });
 
-/**
- * A whole-dollar amount as clients see it: `4000000` -> `$4,000,000`. The
- * locale and currency are fixed, so output never depends on the host's settings.
- */
+/** `4000000` -> `$4,000,000`, independent of the host locale. */
 export function formatUsd(dollars: number): string {
   if (!Number.isSafeInteger(dollars) || dollars < 0) {
     throw new RangeError('dollars must be a non-negative safe integer');
@@ -69,7 +69,6 @@ export function formatUsd(dollars: number): string {
   return USD.format(dollars);
 }
 
-/** The public listing item for a repository record. */
 function toPublicSummary(record: MovieSummaryRecord): MovieSummary {
   return { ...record, budget: formatUsd(record.budget) };
 }
@@ -82,14 +81,8 @@ export class MovieService {
   ) {}
 
   /**
-   * One page of movies, for every listing URL (all, by year, by genre, combined).
-   *
-   * - An unknown genre is a 404, even when other filters would match nothing anyway.
-   *   A known genre with no matches under the other filters is an empty page.
-   * - With a year, the order is chronological (ties broken by movie id in the same
-   *   direction); without one, it is by movie id.
-   * - A page past the end returns an empty `data` array with accurate metadata and
-   *   never reaches the data query.
+   * One page of movies for every listing URL. An unknown genre is a 404; a known
+   * genre with no matches is an empty page. With a year, the order is chronological.
    */
   listMovies({ page, sortOrder, releaseYear, genre }: MovieListCriteria): MovieListResponse {
     if (genre !== undefined && !this.repository.hasGenre(genre)) {
@@ -105,7 +98,7 @@ export class MovieService {
     );
   }
 
-  /** Details for one movie, with its average rating from the rating source. */
+  /** One movie with its average rating. */
   getMovieDetails(movieId: number): MovieDetails {
     const movie = this.repository.findMovieById(movieId);
     if (movie === undefined) throw new MovieNotFoundError(movieId);

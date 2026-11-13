@@ -56,16 +56,27 @@ export function createTestApp(options: { apiRouter?: Router } = {}) {
   return { app, logs: logs.lines };
 }
 
+/** One `movies` row. Omitted columns get a valid default; pass `null` to store NULL. */
 export interface FixtureMovie {
+  /** Primary key. */
   movieId: number;
+  /** Defaults to `tt` plus the zero-padded `movieId`. */
   imdbId?: string;
+  /** Defaults to `Fixture <movieId>`. */
   title?: string;
+  /** Raw JSON text; defaults to `[]`. */
   genres?: string | null;
+  /** Raw text; defaults to `2000-01-01`. */
   releaseDate?: string | null;
+  /** Defaults to 0. */
   budget?: number | null;
+  /** Defaults to `An overview.` */
   overview?: string | null;
+  /** Minutes, or a string to reproduce the source's `''`; defaults to 90. */
   runtime?: number | string | null;
+  /** Defaults to NULL. */
   language?: string | null;
+  /** Raw JSON text; defaults to `[]`. */
   productionCompanies?: string | null;
 }
 

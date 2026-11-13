@@ -9,11 +9,7 @@ export const PUBLIC_DIR = path.join(PROJECT_ROOT, 'public');
 const CONTENT_SECURITY_POLICY =
   "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-/**
- * Serves the landing page at `/` and its stylesheet from `public/`. Only files
- * that exist are served; every other path falls through to the API routes and
- * the JSON 404 handler.
- */
+/** Serves `public/`, with `index.html` at `/`. Other paths fall through to the API routes. */
 export function landingPage(publicDir: string = PUBLIC_DIR): RequestHandler {
   return express.static(publicDir, {
     index: 'index.html',

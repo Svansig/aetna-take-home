@@ -44,20 +44,14 @@ function readPackageVersion(): string {
   return typeof pkg.version === 'string' ? pkg.version : '0.0.0';
 }
 
-/**
- * Build the OpenAPI 3.1 document from the Zod schemas of `/health` and of the
- * movie operations mounted under `apiBasePath`.
- */
+/** Builds the OpenAPI 3.1 document from the Zod schemas. */
 export function buildOpenApiDocument(apiBasePath: string): OpenApiDocument {
   const registry = new OpenAPIRegistry();
   registerHealthDocs(registry);
   registerMoviesDocs(registry, apiBasePath);
 
-  // Schemas named via `.meta({ id })` become components automatically when an
-  // operation references them. ErrorResponse is passed explicitly so the shared
-  // error contract is always published as a named component.
-  // (A schema definition entry is used rather than `registry.register`, which
-  // requires the global `extendZodWithOpenApi` patch.)
+  // Always publish ErrorResponse as a component. Added as a raw definition because
+  // `registry.register` requires the global `extendZodWithOpenApi` patch.
   const definitions = [
     ...registry.definitions,
     { type: 'schema' as const, schema: ErrorResponseSchema },

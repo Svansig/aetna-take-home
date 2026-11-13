@@ -3,21 +3,21 @@ import { z } from 'zod';
 import { DataIntegrityError } from '../db/sqlite.js';
 import type { RatingSource, RatingStats } from './repository.js';
 
-const StatsRowSchema = z.object({ count: z.int().min(0), sum: z.number() });
+const StatsRowSchema = z.object({
+  /** `COUNT(*)` of the movie's ratings. */
+  count: z.int().min(0),
+  /** `TOTAL(rating)`; 0.0 when there are none. */
+  sum: z.number(),
+});
 
 /**
- * Rating source over the original supplied `ratings.db`.
- *
- * **Deliberately naive.** It matches `movies.movieId` (a TMDB id) to
- * `ratings.movieId` (a MovieLens id) as if they were the same number. They are
- * different id systems, so for many movies the ratings belong to an unrelated
- * film. For example, movieId 11 (Star Wars) picks up MovieLens movie 11's ratings
- * (average 3.69), while Star Wars' real MovieLens id is 260 (average 4.22). The
- * API keeps this behaviour on purpose to reflect the supplied data; a correct
- * association would need an authoritative TMDB-to-MovieLens id mapping.
+ * Ratings from `ratings.db`, **deliberately matched naively**: `movies.movieId`
+ * (TMDB) is treated as the same number as `ratings.movieId` (MovieLens), so many
+ * averages belong to a different film. Fixing this would need a TMDB-to-MovieLens
+ * mapping, which the supplied data doesn't include.
  *
  * `ratings.movieId` has no index and the schema must not change, so each call
- * scans the 100,004-row table (about 2 ms).
+ * scans the whole table (about 2 ms).
  */
 export class NaiveSqliteRatingSource implements RatingSource {
   private readonly statement: StatementSync;

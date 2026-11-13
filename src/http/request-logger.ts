@@ -4,9 +4,8 @@ import { pinoHttp } from 'pino-http';
 import type { Logger } from '../logger.js';
 
 /**
- * One structured log line per completed request, plus a per-request child logger
- * (`req.log`) carrying the request id. The id is generated server-side (client
- * supplied ids are not trusted) and echoed in the `X-Request-Id` header.
+ * Logs each request and adds `req.log`. The request id is generated server-side
+ * (client-supplied ids aren't trusted) and returned in `X-Request-Id`.
  */
 export function requestLogger(logger: Logger): RequestHandler {
   return pinoHttp({

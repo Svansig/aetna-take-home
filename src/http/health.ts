@@ -2,14 +2,13 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 export const HealthResponseSchema = z
-  .object({ status: z.literal('ok') })
+  .object({
+    /** Always `ok`; any other outcome is no response at all. */
+    status: z.literal('ok'),
+  })
   .meta({ id: 'HealthResponse', description: 'Process liveness.' });
 
-/**
- * Liveness only: answers 200 whenever the process can serve HTTP. It deliberately
- * does not touch databases or reveal configuration, so it stays cheap and safe to
- * expose.
- */
+/** Liveness only. It deliberately doesn't touch the databases, so it stays cheap and safe to expose. */
 export function healthRouter(): Router {
   const router = Router();
   router.get('/health', (_req, res) => {

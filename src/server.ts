@@ -6,6 +6,13 @@ import { createLogger } from './logger.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
+interface OpenDatabase {
+  /** Short label used in logs. */
+  name: string;
+  /** The open connection. */
+  db: DatabaseSync;
+}
+
 function main(): void {
   let config;
   try {
@@ -31,7 +38,7 @@ function main(): void {
   });
 
   // One read-only connection per database for the life of the process.
-  const databases: { name: string; db: DatabaseSync }[] = [];
+  const databases: OpenDatabase[] = [];
   const closeDatabases = (): string[] =>
     databases.splice(0).map(({ name, db }) => {
       db.close();
@@ -79,8 +86,7 @@ function main(): void {
       process.exit(1);
     }, SHUTDOWN_TIMEOUT_MS).unref();
 
-    // Stops accepting new connections, closes idle keep-alive sockets and waits
-    // for in-flight requests to finish; only then are the databases closed.
+    // Databases are closed only after in-flight requests finish.
     server.close((err) => {
       logger.info({ databases: closeDatabases() }, 'Databases closed');
       if (err) {
